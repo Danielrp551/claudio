@@ -139,6 +139,123 @@ func TestDaemonClosesTheLoopLocally(t *testing.T) {
 	}
 }
 
+// TestDaemonDeliversToASessionItHasNotPolledYet covers the window between a
+// session starting and the daemon noticing it.
+//
+// The poll interval here is longer than the test can possibly take, so the view
+// of local sessions is built exactly once, at startup, before the session in
+// question exists. A message then arrives for somebody the daemon has never
+// seen. Refusing it would look like nothing at all to the person who sent it,
+// so the daemon has to look again before it says no.
+func TestDaemonDeliversToASessionItHasNotPolledYet(t *testing.T) {
+	platform := ccpeer.Platform()
+	if !platform.Verified() {
+		t.Skipf("%s is not a verified platform", platform.GOOS())
+	}
+
+	sessions := t.TempDir()
+	state := filepath.Join(t.TempDir(), "ghosts.json")
+
+	remote := RemoteSession{
+		ID: "s-2", Person: "luis", Machine: "thinkpad", Session: "api", Status: "idle",
+	}
+	transport := NewLoopback([]RemoteSession{remote}, func(msg Outbound) string {
+		return "recibido: " + msg.Text
+	})
+
+	d, err := New(Options{
+		Platform:     platform,
+		SessionsDirs: []string{sessions},
+		StatePath:    state,
+		Executable:   claudioBinary,
+		GhostArgs:    []string{"ghost"},
+		Workspace:    "acme",
+		Transport:    transport,
+		Logger:       quietLogger(),
+		// An hour, so the poll loop runs once and never again while this test is
+		// alive. Anything that works afterwards worked because the daemon looked
+		// again, not because it happened to poll at the right moment.
+		PollInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("Run: %v", err)
+			}
+		case <-time.After(30 * time.Second):
+			t.Error("the daemon did not stop")
+		}
+	})
+
+	sessionReg, err := ccpeer.NewRegistry(platform, sessions)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	// Waiting for the peer first is what puts the session on the late side of
+	// the only poll this daemon will ever do.
+	peerName := PeerName("acme", remote, false)
+	peer := waitForRecord(t, sessionReg, peerName, 30*time.Second)
+
+	// Only now does the session exist.
+	inboxPath, err := platform.NewInboxPath()
+	if err != nil {
+		t.Fatalf("NewInboxPath: %v", err)
+	}
+	inbox, err := ccpeer.Listen(platform, inboxPath, "", quietLogger())
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer inbox.Close()
+
+	pub, err := sessionReg.Publish("herramientas-tarde", inboxPath)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	defer sessionReg.Withdraw(pub)
+	inbox.SetToken(pub.Token)
+
+	frame, err := ccpeer.NewFrame(ccpeer.FrameOptions{
+		Text:        "llegue despues del ultimo barrido",
+		FromAddress: ccpeer.ReplyAddress(inboxPath),
+		FromName:    "herramientas-tarde",
+		FromMode:    "prompting",
+	})
+	if err != nil {
+		t.Fatalf("NewFrame: %v", err)
+	}
+
+	sendCtx, sendCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer sendCancel()
+
+	client := ccpeer.NewClient(platform, sessionReg, quietLogger())
+	if err := client.Deliver(sendCtx, peer, frame); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+
+	select {
+	case got := <-inbox.Frames():
+		env, err := ccpeer.ParseEnvelope(got.Message.Content)
+		if err != nil {
+			t.Fatalf("ParseEnvelope: %v", err)
+		}
+		if !strings.Contains(env.Text, "llegue despues") {
+			t.Errorf("the answer does not carry the original message: %q", env.Text)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the daemon never found a session that was there the whole time")
+	}
+}
+
 // TestDaemonEvictsBeyondTheCap checks the promise that the number of processes
 // belongs to the user: over the cap, extra sessions do not get a peer, and
 // nothing becomes unreachable because the workspace peer remains.

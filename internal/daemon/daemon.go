@@ -652,7 +652,25 @@ func cmpOr(v, fallback string) string {
 	return v
 }
 
+// localSession finds a local Claude Code session by name, or the only one there
+// is when no name is given.
+//
+// A miss is not believed on the first answer. The cached view of local sessions
+// is at most one poll interval old, so a session that started inside that window
+// is real and simply not in it yet. Dropping a message for a session that does
+// exist would be a failure the person who sent it can neither see nor do
+// anything about, and being sure costs one directory listing on a path that has
+// already gone wrong.
 func (d *Daemon) localSession(name string) (ccpeer.Record, error) {
+	rec, err := d.lookupLocal(name)
+	if err == nil {
+		return rec, nil
+	}
+	d.refreshLocal()
+	return d.lookupLocal(name)
+}
+
+func (d *Daemon) lookupLocal(name string) (ccpeer.Record, error) {
 	d.mu.Lock()
 	sessions := make([]ccpeer.Record, len(d.local))
 	copy(sessions, d.local)
