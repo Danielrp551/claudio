@@ -52,25 +52,72 @@ type ControlResponse struct {
 // another process can find it without guessing.
 const AddressFile = "control.addr"
 
-// serveControl binds the control endpoint and answers calls until the context is
+// endpointCheckInterval is how often the control endpoint is checked for still
+// being there. It is frequent enough that a person does not notice the gap and
+// rare enough to be free.
+const endpointCheckInterval = 5 * time.Second
+
+// serveControl keeps a control endpoint available until the context is
 // cancelled.
+//
+// It is a loop rather than a single bind because on the Unix platforms the
+// socket can be removed while this process is healthy: the runtime directory
+// belongs to a login session, and systemd cleans it when the last one ends.
+// Nothing fails when that happens, which is the problem. The listener keeps
+// listening at an address nothing can reach, so every later claudio command
+// reports that the connector is not running while it is running perfectly well.
 func (d *Daemon) serveControl(ctx context.Context, addressPath string) error {
+	defer os.Remove(addressPath)
+
+	for {
+		gone, err := d.serveControlOnce(ctx, addressPath)
+		if err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		if gone {
+			d.log.Warn("the control endpoint was removed from underneath the connector, binding another")
+			continue
+		}
+		return nil
+	}
+}
+
+// serveControlOnce binds one endpoint and serves it. It reports whether it
+// stopped because the endpoint disappeared, which is the one reason worth
+// retrying.
+func (d *Daemon) serveControlOnce(ctx context.Context, addressPath string) (bool, error) {
 	path, err := d.platform.NewLocalPath("claudio-ctl")
 	if err != nil {
-		return err
+		return false, err
 	}
 	ln, err := d.platform.Listen(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if err := os.WriteFile(addressPath, []byte(path), 0o600); err != nil {
 		_ = ln.Close()
-		return fmt.Errorf("daemon: publishing the control address: %w", err)
+		return false, fmt.Errorf("daemon: publishing the control address: %w", err)
 	}
-	defer os.Remove(addressPath)
 
 	d.log.Info("control endpoint ready", "path", path)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// vanished is written by the watchdog and read after Accept fails, so the
+	// loop above can tell a missing endpoint from a real error.
+	vanished := make(chan struct{})
+
+	var watchdog sync.WaitGroup
+	watchdog.Add(1)
+	go func() {
+		defer watchdog.Done()
+		d.watchEndpoint(ctx, path, vanished, cancel)
+	}()
 
 	var conns sync.WaitGroup
 	go func() {
@@ -82,16 +129,48 @@ func (d *Daemon) serveControl(ctx context.Context, addressPath string) error {
 		conn, err := ln.Accept()
 		if err != nil {
 			conns.Wait()
-			if ctx.Err() != nil {
-				return nil
+			cancel()
+			watchdog.Wait()
+
+			select {
+			case <-vanished:
+				return true, nil
+			default:
 			}
-			return fmt.Errorf("daemon: the control endpoint stopped accepting: %w", err)
+			if ctx.Err() != nil {
+				return false, nil
+			}
+			return false, fmt.Errorf("daemon: the control endpoint stopped accepting: %w", err)
 		}
 		conns.Add(1)
 		go func() {
 			defer conns.Done()
 			d.serveControlConn(ctx, conn)
 		}()
+	}
+}
+
+// watchEndpoint reports that path stopped existing and stops the server, which
+// is what makes Accept return so the endpoint can be bound again.
+//
+// The order matters. The channel is closed before the context is cancelled, so
+// that by the time Accept fails the reason is already recorded and cannot be
+// mistaken for an ordinary shutdown.
+func (d *Daemon) watchEndpoint(ctx context.Context, path string, vanished chan<- struct{}, stop func()) {
+	t := time.NewTicker(endpointCheckInterval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if !d.platform.EndpointAlive(path) {
+				close(vanished)
+				stop()
+				return
+			}
+		}
 	}
 }
 

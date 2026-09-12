@@ -31,6 +31,7 @@ type authLine struct {
 // the range ending means the inbox is fully stopped.
 type Inbox struct {
 	ln     net.Listener
+	path   string
 	frames chan Frame
 	log    *slog.Logger
 
@@ -61,6 +62,7 @@ func Listen(platform LocalEndpoint, path, token string, log *slog.Logger) (*Inbo
 
 	in := &Inbox{
 		ln:     ln,
+		path:   path,
 		frames: make(chan Frame, 16),
 		log:    log,
 		token:  token,
@@ -72,8 +74,16 @@ func Listen(platform LocalEndpoint, path, token string, log *slog.Logger) (*Inbo
 	return in, nil
 }
 
-// Addr returns the path this inbox is bound to.
+// Addr returns the address the listener reports.
 func (i *Inbox) Addr() string { return i.ln.Addr().String() }
+
+// Path returns the path this inbox was asked to bind.
+//
+// It is kept rather than read back from the listener because that is the value
+// a watchdog has to check. What matters is whether the endpoint is still where
+// this process put it, and the listener goes on reporting its address happily
+// after the file underneath it has been removed.
+func (i *Inbox) Path() string { return i.path }
 
 // SetToken installs the token incoming authentication lines are checked against.
 //

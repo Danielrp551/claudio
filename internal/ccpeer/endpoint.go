@@ -52,6 +52,18 @@ type LocalEndpoint interface {
 	// Dial opens a connection to another session's inbox.
 	Dial(ctx context.Context, path string) (net.Conn, error)
 
+	// EndpointAlive reports whether an endpoint this process bound can still be
+	// reached at path.
+	//
+	// It exists because on the Unix platforms the answer can be no while the
+	// process is perfectly healthy. A socket lives in the filesystem, and
+	// systemd removes the whole runtime directory when the user's last login
+	// session ends, which happens to anybody who starts the connector over ssh
+	// and then logs out. The kernel keeps the binding, so nothing fails and
+	// nothing is logged, and the endpoint is simply unreachable for the rest of
+	// its life.
+	EndpointAlive(path string) bool
+
 	// RequiresAuthLine reports whether this platform refuses a connection whose
 	// first line is not a valid authentication line. It is true on Windows and
 	// false elsewhere, and it is verified in both directions.

@@ -38,6 +38,13 @@ All notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- The connector no longer keeps running with endpoints nothing can reach. On the
+  Unix platforms a socket lives in a directory that belongs to a login session,
+  and systemd removes it when the last one ends, which happens to anybody who
+  starts the connector over ssh and then logs out. Nothing failed and nothing was
+  logged. A peer now notices, says so, and stops, and the supervisor replaces it;
+  the control endpoint binds itself somewhere else and carries on.
+
 - The main package was missing from the repository. An unanchored `claudio` line in `.gitignore`
   also matched the `cmd/claudio` directory, so the published tree did not build. The binary patterns
   are anchored to the repository root now.

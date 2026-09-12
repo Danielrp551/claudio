@@ -182,6 +182,20 @@ func (unixEndpoint) Listen(path string) (net.Listener, error) {
 	return l, nil
 }
 
+// EndpointAlive reports whether the socket file is still where it was bound.
+//
+// Lstat rather than Stat, and the mode is checked rather than assumed, because
+// "something exists at that path" is not the question. The question is whether
+// what exists is still the socket this process bound, and a plain file or a link
+// left there by somebody else is a no.
+func (unixEndpoint) EndpointAlive(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeSocket != 0
+}
+
 func (unixEndpoint) Dial(ctx context.Context, path string) (net.Conn, error) {
 	var d net.Dialer
 	c, err := d.DialContext(ctx, "unix", path)

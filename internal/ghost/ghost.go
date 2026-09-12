@@ -177,7 +177,14 @@ func serve(
 	heartbeat.Add(1)
 	go func() {
 		defer heartbeat.Done()
-		runHeartbeat(ctx, cfg, reg, pub, state)
+		runHeartbeat(ctx, cfg, reg, pub, inbox.Path(), state, func(reason string) {
+			// Reported before the cancel, so the daemon learns why this ghost
+			// went away rather than just that it did.
+			if err := out.send(Event{Op: OpError, Message: reason}); err != nil {
+				cfg.Logger.Error("ghost could not report why it is stopping", "error", err)
+			}
+			cancel()
+		})
 	}()
 
 	// The control loop ends when the parent goes away, which is the normal end
@@ -212,12 +219,27 @@ func serve(
 	heartbeat.Wait()
 }
 
+// runHeartbeat refreshes the record and watches the endpoint.
+//
+// The second job is the one that is easy to leave out and expensive to miss. On
+// the Unix platforms the socket file can be removed while this process is
+// perfectly healthy, because the runtime directory belongs to a login session
+// rather than to us. Nothing fails when that happens. The listener keeps
+// listening, the record keeps saying the peer is ready, and no Claude Code
+// session can reach it ever again.
+//
+// A ghost cannot repair that from the inside without tearing down the very
+// channel its frames arrive on, so it does the honest thing instead: it says
+// what happened and stops. The supervisor already knows how to replace a ghost
+// that went away, and the replacement binds somewhere that exists.
 func runHeartbeat(
 	ctx context.Context,
 	cfg Config,
 	reg *ccpeer.Registry,
 	pub ccpeer.Publication,
+	endpoint string,
 	state *status,
+	giveUp func(reason string),
 ) {
 	// One timer, reset each round, rather than a fresh timer per iteration.
 	t := time.NewTimer(cfg.Heartbeat)
@@ -228,6 +250,22 @@ func runHeartbeat(
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if !cfg.Platform.EndpointAlive(endpoint) {
+				// A shutdown removes the endpoint too: closing the listener
+				// unlinks the socket on the Unix platforms, and the cancel that
+				// starts a shutdown happens before that close. So an endpoint
+				// that is gone while the context is already done is this ghost
+				// stopping normally, not the failure this watch is for. Saying
+				// otherwise would report an error on every clean exit, and would
+				// block here waiting for a parent that has stopped reading.
+				if ctx.Err() != nil {
+					return
+				}
+				giveUp(fmt.Sprintf(
+					"the endpoint %s is gone from underneath this peer, so nothing "+
+						"can reach it any more", endpoint))
+				return
+			}
 			if _, err := reg.Update(pub, state.get()); err != nil {
 				cfg.Logger.Warn("ghost could not refresh its record", "error", err)
 			}

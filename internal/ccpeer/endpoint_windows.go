@@ -57,6 +57,15 @@ func (windowsEndpoint) Listen(path string) (net.Listener, error) {
 	return l, nil
 }
 
+// EndpointAlive is always true on Windows, and that is not a shortcut.
+//
+// A named pipe is an object in the kernel namespace rather than a file on a
+// disk, so there is nothing on a filesystem for anybody to remove and no
+// equivalent of a runtime directory being cleaned. The pipe exists exactly as
+// long as the listener that created it, which belongs to this process, so the
+// question the Unix implementations have to ask cannot arise here.
+func (windowsEndpoint) EndpointAlive(string) bool { return true }
+
 func (windowsEndpoint) Dial(ctx context.Context, path string) (net.Conn, error) {
 	c, err := winio.DialPipeContext(ctx, path)
 	if err != nil {
