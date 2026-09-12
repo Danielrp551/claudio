@@ -75,12 +75,17 @@ func runDaemon(ctx context.Context, env Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	configPath, err := config.Path(config.FileConfig)
+	if err != nil {
+		return err
+	}
 
 	d, err := daemon.New(daemon.Options{
 		SessionsDirs:       cfg.SessionsDirs,
 		StatePath:          ghosts,
 		StatusPath:         status,
 		HeldPath:           heldPath,
+		ConfigPath:         configPath,
 		ControlAddressPath: controlAddr,
 		Workspace:          cfg.Workspace,
 		MachineID:          cfg.MachineID,
@@ -554,28 +559,40 @@ func runPolicy(_ context.Context, env Env, args []string) error {
 		}
 	}
 
+	fmt.Fprintf(env.Stdout, "mode        %s\n", cfg.Policy.Mode)
+
+	if cfg.Policy.Mode == daemon.ModeOff {
+		fmt.Fprintln(env.Stdout, "processes   none")
+		fmt.Fprintln(env.Stdout,
+			"\noff means no processes at all, so nothing from this workspace appears in")
+		fmt.Fprintln(env.Stdout,
+			"your agent list and everything goes through the MCP tools instead.")
+		return nil
+	}
+
 	// The workspace peer counts. It is not one of the ghosts the cap governs, it
 	// is always there on top of them, and a figure that leaves it out understates
 	// what somebody is agreeing to by exactly one process.
-	processes := cfg.Policy.Cap()
-	if cfg.Policy.Mode != daemon.ModeOff {
-		processes++
-	}
-	fmt.Fprintf(env.Stdout, "mode        %s\n", cfg.Policy.Mode)
-	fmt.Fprintf(env.Stdout, "max ghosts  %d, so %d processes and about %d MB of resident memory\n",
-		cfg.Policy.Cap(), processes, processes*6+20)
+	processes := cfg.Policy.Cap() + 1
+	fmt.Fprintf(env.Stdout, "max ghosts  %d\n", cfg.Policy.Cap())
+	fmt.Fprintf(env.Stdout, "processes   up to %s, about %d MB of resident memory\n",
+		plural(processes, "process", "processes"), processes*6+20)
 	fmt.Fprintln(env.Stdout,
-		"\nbeyond the cap the least recently used loses its process. Nothing becomes")
-	if cfg.Policy.Mode == daemon.ModeOff {
-		fmt.Fprintln(env.Stdout,
-			"\noff means no processes at all, so nothing appears in your agent list and")
-		fmt.Fprintln(env.Stdout,
-			"everything goes through the MCP tools instead.")
-	} else {
-		fmt.Fprintln(env.Stdout,
-			"unreachable, because the workspace peer still carries everybody.")
-	}
+		"\nthat is the cap plus the workspace peer, which is always there. Beyond the")
+	fmt.Fprintln(env.Stdout,
+		"cap the least recently used loses its process, and nothing becomes")
+	fmt.Fprintln(env.Stdout,
+		"unreachable, because the workspace peer still carries everybody.")
 	return nil
+}
+
+// plural renders a count with the right noun, because "1 processes" in the one
+// place somebody reads before agreeing to run them reads like carelessness.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 // describeTransport says whether the workspace can be reached, in a sentence

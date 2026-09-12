@@ -150,6 +150,9 @@ type Options struct {
 	// control endpoint, so the MCP server and the command line can find it.
 	ControlAddressPath string
 
+	// ConfigPath is the file Reload reads, used only to notice when it changed.
+	ConfigPath string
+
 	// Reload rereads the settings that belong to this machine, if the caller
 	// provides it.
 	//
@@ -180,6 +183,11 @@ type Daemon struct {
 	// sup is the running supervisor, so a control call can deliver a message
 	// that was waiting for approval. It is nil until Run starts one.
 	sup *supervisor
+
+	// settingsAt and settingsSize describe the configuration file as it was when
+	// it was last read.
+	settingsAt   time.Time
+	settingsSize int64
 
 	// replyTo maps every way somebody might name a recent sender to an address
 	// the transport accepts. It is what makes a conversation go both ways when
@@ -359,6 +367,32 @@ func (d *Daemon) poll(ctx context.Context, sup *supervisor) {
 	}
 }
 
+// settingsChanged reports whether the configuration file has been written since
+// it was last read, so the common case of nothing having changed costs one stat
+// rather than a read and a decode.
+//
+// A file that cannot be stated is reported as changed. Rereading something that
+// did not change is harmless, and skipping something that did is not.
+func (d *Daemon) settingsChanged() bool {
+	if d.opts.ConfigPath == "" {
+		return true
+	}
+
+	info, err := os.Stat(d.opts.ConfigPath)
+	if err != nil {
+		return true
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if info.ModTime().Equal(d.settingsAt) && info.Size() == d.settingsSize {
+		return false
+	}
+	d.settingsAt = info.ModTime()
+	d.settingsSize = info.Size()
+	return true
+}
+
 // reloadSettings picks up changes a person made while this was running.
 //
 // Only the settings that belong to this machine are reread. The workspace, the
@@ -366,6 +400,9 @@ func (d *Daemon) poll(ctx context.Context, sup *supervisor) {
 // those means starting again.
 func (d *Daemon) reloadSettings() {
 	if d.opts.Reload == nil {
+		return
+	}
+	if !d.settingsChanged() {
 		return
 	}
 
@@ -758,7 +795,18 @@ func (d *Daemon) deliver(ctx context.Context, sup *supervisor, msg Delivery, app
 	// Permissions are untouched at every level.
 	d.rememberSender(msg)
 
-	level := d.opts.Trust.For(msg.ProposedTrust, msg.From.Person, target.Name)
+	// Reread before deciding, not only once per poll. Lowering the trust of
+	// somebody is a decision that should apply to the next message rather than
+	// to the next message after that, and a poll interval is long enough for one
+	// to slip through. The cost is a stat, because the reread only happens when
+	// the file has actually changed.
+	d.reloadSettings()
+
+	d.mu.Lock()
+	settings := d.opts.Trust
+	d.mu.Unlock()
+
+	level := settings.For(msg.ProposedTrust, msg.From.Person, target.Name)
 	if level == trust.Hold && approved {
 		// Approved, so the gate is spent. The framing falls back to the default,
 		// because hold says nothing about how to read a message, only about when.
@@ -881,11 +929,24 @@ func (d *Daemon) lookupLocal(name string) (ccpeer.Record, error) {
 		}
 		return ccpeer.Record{}, fmt.Errorf("%w: local session %q", ccpeer.ErrNotFound, name)
 	}
-	if len(sessions) == 1 {
+	switch len(sessions) {
+	case 1:
 		return sessions[0], nil
+	case 0:
+		// Told apart from ambiguity on purpose. "Several sessions answer to that
+		// name" when there are none reads like a different failure than the one
+		// that happened, and the two need different things done about them.
+		return ccpeer.Record{}, fmt.Errorf(
+			"%w: no Claude Code session is running on this machine", ccpeer.ErrNotFound)
+	default:
+		names := make([]string, 0, len(sessions))
+		for _, s := range sessions {
+			names = append(names, s.Name)
+		}
+		return ccpeer.Record{}, fmt.Errorf(
+			"%w: the message names no session and %d are running: %s",
+			ccpeer.ErrAmbiguous, len(sessions), strings.Join(names, ", "))
 	}
-	return ccpeer.Record{}, fmt.Errorf(
-		"%w: no session named and %d are running", ccpeer.ErrAmbiguous, len(sessions))
 }
 
 func (d *Daemon) endpointOf(sup *supervisor, peer string) string {

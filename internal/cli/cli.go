@@ -104,11 +104,11 @@ func Run(ctx context.Context, env Env, args []string) error {
 	case "sessions":
 		return runSessions(ctx, env, rest)
 	case "pending":
-		return runPending(ctx, env, args)
+		return runPending(ctx, env, rest)
 	case "approve":
-		return runApprove(ctx, env, args)
+		return runApprove(ctx, env, rest)
 	case "drop":
-		return runDrop(ctx, env, args)
+		return runDrop(ctx, env, rest)
 	case "trust":
 		return runTrust(ctx, env, rest)
 	case "policy":

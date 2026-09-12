@@ -295,3 +295,25 @@ func mustWorkspaceID(t *testing.T, f *fixture) string {
 	}
 	return ws.ID
 }
+
+// TestAMemberAddressIsNotASessionName is the regression test for a reply that
+// reached the right machine and then could not be delivered.
+//
+// A reply is addressed to a member, because somebody who wrote to you can be
+// answered whether or not they expose a session of their own. The address used
+// to travel in the field that names a destination session, so the receiver
+// looked for a local session called "member:6e0f..." and failed to deliver a
+// message it had every means to deliver.
+func TestAMemberAddressIsNotASessionName(t *testing.T) {
+	t.Parallel()
+
+	if got := sessionNamed("member:6e0fc2013a95808e6720dd8d"); got != "" {
+		t.Errorf("a member address became the session name %q", got)
+	}
+	if got := sessionNamed("thinkpad:api"); got != "thinkpad:api" {
+		t.Errorf("a real session identifier was changed to %q", got)
+	}
+	if got := sessionNamed(""); got != "" {
+		t.Errorf("an empty destination became %q", got)
+	}
+}

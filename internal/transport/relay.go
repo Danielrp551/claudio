@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -177,6 +178,25 @@ func (c *RelayClient) Expose(sessions []daemon.ExposedSession) {
 	}
 }
 
+// memberPrefix marks an address that names a member rather than one of their
+// sessions. It is what a reply is addressed to, because somebody who wrote to
+// you can be answered whether or not they expose a session of their own.
+const memberPrefix = "member:"
+
+// sessionNamed returns the destination session, or nothing when the address
+// names a member instead.
+//
+// A message addressed to a member names no session of theirs, so the field that
+// names one is left empty and the receiving machine decides where it goes.
+// Putting the address in it made the receiver look for a local session called
+// "member:..." and fail to deliver a message it had every means to deliver.
+func sessionNamed(to string) string {
+	if strings.HasPrefix(to, memberPrefix) {
+		return ""
+	}
+	return to
+}
+
 // Send seals a message for the member who owns the destination session and hands
 // it to the relay.
 //
@@ -220,7 +240,7 @@ func (c *RelayClient) Send(ctx context.Context, msg daemon.Outbound) error {
 		Text:        msg.Text,
 		FromSession: msg.FromSession,
 		FromMode:    msg.FromMode,
-		ToSession:   msg.To,
+		ToSession:   sessionNamed(msg.To),
 		MsgID:       msg.MsgID,
 		Seq:         seq,
 	}
@@ -546,7 +566,7 @@ func (c *RelayClient) applyEnvelope(msg relay.Message) {
 	// expose a session. The address is registered the same way a roster entry
 	// is, so Send resolves it without a special case, and it outlives the
 	// connection because the relay will hold a message for a member who left.
-	replyTo := "member:" + sender.ID
+	replyTo := memberPrefix + sender.ID
 	c.mu.Lock()
 	c.lastKnown[replyTo] = relay.RosterSession{
 		ID:       replyTo,
