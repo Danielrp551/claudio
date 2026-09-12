@@ -1,8 +1,10 @@
-# Binaries
+# Binaries. The patterns are anchored to the repository root on purpose: an
+# unanchored "claudio" also matches the cmd/claudio directory, which would
+# quietly leave the main package out of the repository.
 /bin/
 /dist/
-claudio
-claudio.exe
+/claudio
+/claudio.exe
 
 # Go
 /vendor/
