@@ -4,10 +4,10 @@ import (
 	"context"
 	"path/filepath"
 
-	"github.com/danielrp551/claudio/internal/ccpeer"
-	"github.com/danielrp551/claudio/internal/config"
-	"github.com/danielrp551/claudio/internal/daemon"
-	"github.com/danielrp551/claudio/internal/mcpserver"
+	"github.com/Danielrp551/claudio/internal/ccpeer"
+	"github.com/Danielrp551/claudio/internal/config"
+	"github.com/Danielrp551/claudio/internal/daemon"
+	"github.com/Danielrp551/claudio/internal/mcpserver"
 )
 
 // runMCP serves the MCP interface over standard input and output.

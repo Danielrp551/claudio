@@ -15,7 +15,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/danielrp551/claudio/internal/daemon"
+	"github.com/Danielrp551/claudio/internal/daemon"
 )
 
 // File names inside the configuration directory.

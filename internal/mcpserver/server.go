@@ -22,7 +22,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/danielrp551/claudio/internal/daemon"
+	"github.com/Danielrp551/claudio/internal/daemon"
 )
 
 // defaultProtocolVersion is used when a client does not name one.

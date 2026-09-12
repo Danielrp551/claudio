@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/ccpeer"
+	"github.com/Danielrp551/claudio/internal/ccpeer"
 )
 
 // orphanIndex remembers which records this daemon's children published.

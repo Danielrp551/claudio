@@ -14,7 +14,7 @@ import (
 
 	"go.uber.org/goleak"
 
-	"github.com/danielrp551/claudio/internal/ccpeer"
+	"github.com/Danielrp551/claudio/internal/ccpeer"
 )
 
 // claudioBinary is built once for the whole package. The supervisor spawns real

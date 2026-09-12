@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/ccpeer"
+	"github.com/Danielrp551/claudio/internal/ccpeer"
 )
 
 // TestDaemonClosesTheLoopLocally is the milestone this project is built around,

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/identity"
+	"github.com/Danielrp551/claudio/internal/identity"
 )
 
 func newIdentity(t *testing.T) identity.Public {

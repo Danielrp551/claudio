@@ -20,10 +20,10 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/danielrp551/claudio/internal/daemon"
-	"github.com/danielrp551/claudio/internal/identity"
-	"github.com/danielrp551/claudio/internal/relay"
-	"github.com/danielrp551/claudio/internal/workspace"
+	"github.com/Danielrp551/claudio/internal/daemon"
+	"github.com/Danielrp551/claudio/internal/identity"
+	"github.com/Danielrp551/claudio/internal/relay"
+	"github.com/Danielrp551/claudio/internal/workspace"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/ghost"
+	"github.com/Danielrp551/claudio/internal/ghost"
 )
 
 // runGhost holds one native peer endpoint.

@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/ccpeer"
-	"github.com/danielrp551/claudio/internal/trust"
+	"github.com/Danielrp551/claudio/internal/ccpeer"
+	"github.com/Danielrp551/claudio/internal/trust"
 )
 
 // Promotion modes.

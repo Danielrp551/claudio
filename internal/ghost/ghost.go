@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/ccpeer"
+	"github.com/Danielrp551/claudio/internal/ccpeer"
 )
 
 // DefaultHeartbeat is how often a ghost refreshes its record.

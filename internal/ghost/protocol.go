@@ -1,6 +1,6 @@
 package ghost
 
-import "github.com/danielrp551/claudio/internal/ccpeer"
+import "github.com/Danielrp551/claudio/internal/ccpeer"
 
 // The control protocol between a daemon and one of its ghost children.
 //

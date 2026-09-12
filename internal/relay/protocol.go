@@ -1,8 +1,8 @@
 package relay
 
 import (
-	"github.com/danielrp551/claudio/internal/identity"
-	"github.com/danielrp551/claudio/internal/workspace"
+	"github.com/Danielrp551/claudio/internal/identity"
+	"github.com/Danielrp551/claudio/internal/workspace"
 )
 
 // The wire protocol between a connector and a relay, as newline delimited JSON

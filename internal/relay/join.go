@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/identity"
-	"github.com/danielrp551/claudio/internal/workspace"
+	"github.com/Danielrp551/claudio/internal/identity"
+	"github.com/Danielrp551/claudio/internal/workspace"
 )
 
 // JoinRequest is what a machine sends to redeem an invitation.

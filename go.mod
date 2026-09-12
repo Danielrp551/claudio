@@ -1,4 +1,4 @@
-module github.com/danielrp551/claudio
+module github.com/Danielrp551/claudio
 
 go 1.24
 

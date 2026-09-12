@@ -3,7 +3,7 @@ package workspace
 import (
 	"time"
 
-	"github.com/danielrp551/claudio/internal/identity"
+	"github.com/Danielrp551/claudio/internal/identity"
 )
 
 // Roles a member can hold.

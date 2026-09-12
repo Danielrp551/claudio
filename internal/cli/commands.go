@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/ccpeer"
-	"github.com/danielrp551/claudio/internal/config"
-	"github.com/danielrp551/claudio/internal/daemon"
-	"github.com/danielrp551/claudio/internal/identity"
-	"github.com/danielrp551/claudio/internal/relay"
-	"github.com/danielrp551/claudio/internal/transport"
-	"github.com/danielrp551/claudio/internal/trust"
-	"github.com/danielrp551/claudio/internal/workspace"
+	"github.com/Danielrp551/claudio/internal/ccpeer"
+	"github.com/Danielrp551/claudio/internal/config"
+	"github.com/Danielrp551/claudio/internal/daemon"
+	"github.com/Danielrp551/claudio/internal/identity"
+	"github.com/Danielrp551/claudio/internal/relay"
+	"github.com/Danielrp551/claudio/internal/transport"
+	"github.com/Danielrp551/claudio/internal/trust"
+	"github.com/Danielrp551/claudio/internal/workspace"
 )
 
 // runDaemon is the connector for this machine.

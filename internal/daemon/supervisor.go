@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/ccpeer"
-	"github.com/danielrp551/claudio/internal/ghost"
+	"github.com/Danielrp551/claudio/internal/ccpeer"
+	"github.com/Danielrp551/claudio/internal/ghost"
 )
 
 const (

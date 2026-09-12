@@ -78,7 +78,7 @@ is a limit of Claude Code, not of this tool, and the daemon reports it rather th
 ## Quick start
 
 ```bash
-go install github.com/danielrp551/claudio/cmd/claudio@latest
+go install github.com/Danielrp551/claudio/cmd/claudio@latest
 ```
 
 **One person hosts the workspace and runs the relay:**

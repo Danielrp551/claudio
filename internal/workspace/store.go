@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielrp551/claudio/internal/identity"
+	"github.com/Danielrp551/claudio/internal/identity"
 )
 
 var (
