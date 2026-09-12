@@ -136,7 +136,7 @@ func (i *Inbox) accept() {
 // part of the preflight it performs before delivering, so an empty connection is
 // normal and must not be logged as a problem.
 func (i *Inbox) serve(c net.Conn) {
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	r := bufio.NewReaderSize(c, 64<<10)
 	sc := bufio.NewScanner(r)

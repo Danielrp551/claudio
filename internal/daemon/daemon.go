@@ -546,7 +546,6 @@ func splitMention(text string) (mention, rest string) {
 }
 
 func matchesMention(s RemoteSession, mention string) bool {
-	mention = strings.ToLower(mention)
 	candidates := []string{
 		s.ID,
 		s.Person + "/" + s.Session,
@@ -554,7 +553,7 @@ func matchesMention(s RemoteSession, mention string) bool {
 		s.Session,
 	}
 	for _, c := range candidates {
-		if strings.ToLower(c) == mention {
+		if strings.EqualFold(c, mention) {
 			return true
 		}
 	}

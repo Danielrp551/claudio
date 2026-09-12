@@ -125,7 +125,8 @@ func runRelay(ctx context.Context, env Env, args []string) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	listener, err := net.Listen("tcp", *addr)
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, "tcp", *addr)
 	if err != nil {
 		return fmt.Errorf("relay: listening on %s: %w", *addr, err)
 	}
@@ -551,9 +552,13 @@ func runSessions(_ context.Context, env Env, _ []string) error {
 func runStatus(_ context.Context, env Env, _ []string) error {
 	status, err := readStatus()
 	if err != nil {
+		// Not an error to report. A connector that is not running is a perfectly
+		// ordinary thing for status to find, and telling the person how to start
+		// it is more useful than a non zero exit code.
+		//
 		fmt.Fprintln(env.Stdout, "the connector does not appear to be running")
 		fmt.Fprintln(env.Stdout, "start it with \"claudio daemon\"")
-		return nil
+		return nil //nolint:nilerr // the absence of a status file is a state, not a failure
 	}
 
 	fmt.Fprintf(env.Stdout, "workspace     %s\n", cmpOr(status.Workspace, "none"))

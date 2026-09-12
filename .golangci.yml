@@ -16,33 +16,75 @@ linters:
     - revive
     - unconvert
     - unparam
-    - wrapcheck
 
-linters-settings:
-  errorlint:
-    errorf: true
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-  revive:
+  settings:
+    errcheck:
+      # Writing to standard output is checked by nobody and recovers from
+      # nothing. A command that cannot print has already lost.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Print
+        - fmt.Printf
+        - fmt.Println
+        # Cleanup whose failure changes nothing the program could do about it.
+        # Closing a connection that is going away, or removing a temporary file
+        # on an error path, has no recovery and no second attempt.
+        - (io.Closer).Close
+        - os.Remove
+        - os.RemoveAll
+        - syscall.CloseHandle
+
+    errorlint:
+      errorf: true
+
+    gocritic:
+      # Style checks are opinions, and this project already has a written one.
+      # Diagnostics and performance are findings.
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        # Both are micro-optimisations about copying small structs on paths that
+        # run a few times a second. Following them would trade readable value
+        # semantics for pointers with no measurement behind the change.
+        - hugeParam
+        - rangeValCopy
+
+    gosec:
+      excludes:
+        # Every file this tool reads is at a path it built itself, from the
+        # configuration directory or from a session registry. There is no user
+        # supplied path to traverse with, and annotating a dozen call sites
+        # would be noise rather than review.
+        - G304
+        # Unhandled errors are errcheck's job, and it is configured above with
+        # the cleanup calls this project deliberately ignores. Two linters
+        # disagreeing about the same line helps nobody.
+        - G104
+
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+
+  exclusions:
     rules:
-      - name: exported
-        severity: warning
-  wrapcheck:
-    ignoreSigs:
-      - .Errorf(
-      - errors.New(
-      - errors.Join(
-      - .Wrap(
+      # Test files may be looser about wrapping and about spawning the binary
+      # they are testing.
+      # A test that fails to close something is caught by the goroutine leak
+      # check, which is a better signal than a linter and is already wired in.
+      - path: _test\.go
+        linters:
+          - gosec
+          - unparam
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
 
 issues:
-  exclude-rules:
-    # Test files may be looser about error wrapping and security linting.
-    - path: _test.go
-      linters:
-        - wrapcheck
-        - gosec
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "windows" {
 		claudioBinary += ".exe"
 	}
-	build := exec.Command("go", "build", "-o", claudioBinary, "../../cmd/claudio")
+	build := exec.CommandContext(context.Background(), "go", "build", "-o", claudioBinary, "../../cmd/claudio")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "building the binary:", err)

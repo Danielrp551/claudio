@@ -82,7 +82,7 @@ func (c *Client) Deliver(ctx context.Context, target Record, f Frame) error {
 	if err != nil {
 		return fmt.Errorf("delivering to %s: %w", target.Name, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetWriteDeadline(deadline)
@@ -158,6 +158,7 @@ func NewFrame(o FrameOptions) (Frame, error) {
 	// of them, producing an address the receiver cannot dial. Claude Code writes
 	// these paths literally, so this does too, with only the characters that
 	// would break the element itself escaped.
+	//nolint:gocritic // %q would escape the backslashes in a Windows path, see above
 	content := fmt.Sprintf(
 		"<cross-session-message from=\"%s\" from-name=\"%s\" from-mode=\"%s\">\n%s\n</cross-session-message>",
 		escapeAttr(o.FromAddress), escapeAttr(o.FromName), escapeAttr(o.FromMode), o.Text)

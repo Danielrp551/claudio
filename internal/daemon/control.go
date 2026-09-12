@@ -96,7 +96,7 @@ func (d *Daemon) serveControl(ctx context.Context, addressPath string) error {
 }
 
 func (d *Daemon) serveControlConn(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	sc := bufio.NewScanner(conn)
@@ -220,7 +220,7 @@ func (c *ControlClient) Call(ctx context.Context, req ControlRequest) (ControlRe
 	if err != nil {
 		return ControlResponse{}, fmt.Errorf("daemon: reaching the connector: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)

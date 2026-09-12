@@ -7,8 +7,10 @@ A message you send arrives in the other person's session the same way a message 
 sessions does, with attribution and a reply address. You do not learn a new tool, and neither does
 Claude.
 
-> **Status: pre alpha.** The protocol work is done and validated. The implementation has not started.
-> Commands exist in the help output and report that they are not implemented yet.
+> **Status: version one, not yet released.** Everything described here works and is covered by tests,
+> including an acceptance test that runs two connectors and a relay and requires a message to arrive
+> in the other person's session inbox. It has not been used by anybody other than its authors, and
+> macOS is not verified.
 
 ## What it does
 
@@ -75,11 +77,42 @@ is a limit of Claude Code, not of this tool, and the daemon reports it rather th
 
 ## Quick start
 
-Nothing to start yet. When there is:
-
 ```bash
 go install github.com/danielrp551/claudio/cmd/claudio@latest
-claudio daemon
+```
+
+**One person hosts the workspace and runs the relay:**
+
+```bash
+claudio workspace create acme --name "Acme"
+claudio relay --addr :8787          # keep this running, behind TLS in production
+claudio invite --workspace acme     # prints a code to hand over
+```
+
+**Everybody joins with that code:**
+
+```bash
+claudio join <code> --relay wss://relay.example.com/connect --workspace acme
+claudio expose my-session           # share one session, by name
+claudio daemon                      # keep this running
+```
+
+**Then check what you have:**
+
+```bash
+claudio doctor     # what this machine can and cannot do
+claudio status     # what is running, and what each process is for
+claudio sessions   # who you can reach
+```
+
+Inside a Claude Code session the remote sessions appear in the agent list, so Claude messages them
+with `SendMessage` the same way it messages your own.
+
+Optionally register the MCP server with Claude Code, which gives Claude the roster and a way to
+promote a session to a native peer:
+
+```bash
+claude mcp add claudio -- claudio mcp
 ```
 
 ## Commands
@@ -89,23 +122,31 @@ claudio daemon
 | `claudio daemon` | Run the connector for this machine |
 | `claudio mcp` | Serve the MCP interface over stdio |
 | `claudio relay` | Run a relay server |
-| `claudio workspace` | Create and inspect workspaces |
-| `claudio invite` | Create an invitation |
+| `claudio workspace create` | Create a workspace, where the relay lives |
+| `claudio workspace list` | Show members and their fingerprints |
+| `claudio invite` | Create an invitation code |
 | `claudio join` | Redeem an invitation |
+| `claudio expose` | Share a local session with the workspace |
+| `claudio unexpose` | Stop sharing one |
 | `claudio sessions` | List sessions reachable in a workspace |
-| `claudio promote` | Give a remote session its own native peer |
 | `claudio trust` | Set the trust level for a person, workspace, or session |
-| `claudio policy` | Set promotion mode and the ghost cap |
+| `claudio policy` | Set promotion mode and the cap on native peers |
 | `claudio status` | Show what this machine is running and why |
+| `claudio doctor` | Report what this machine can and cannot do |
 
 ## Development
 
 ```bash
 make build     # build the binary
 make test      # run tests
+make race      # run them with the race detector
 make lint      # run golangci-lint
 make check     # fmt, vet, lint, test
 ```
+
+The race detector needs cgo and a working 64 bit C compiler. That is the default on Linux and macOS,
+and often missing on Windows, which is why it has a target of its own rather than making an ordinary
+test run fail.
 
 ## Contributing
 

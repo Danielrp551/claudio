@@ -62,6 +62,8 @@ func (o *orphanIndex) load() error {
 		// A corrupt index is not worth failing a start over. The cost of losing
 		// it is a few inert records that Claude Code already ignores, and the
 		// cost of refusing to start is the whole tool.
+		//
+		//nolint:nilerr // losing this file is recoverable, refusing to start is not
 		return nil
 	}
 	for _, e := range entries {

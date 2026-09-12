@@ -261,6 +261,11 @@ func (s *supervisor) keepAlive(ctx context.Context, st *peerState) {
 
 // runOnce starts one ghost and returns when it has exited.
 func (s *supervisor) runOnce(ctx context.Context, st *peerState) error {
+	// The executable is this program's own path, resolved at startup, and the
+	// arguments are a fixed list this package controls. Neither comes from a
+	// message or from anything a peer can influence.
+	//
+	//nolint:gosec // the command is this binary, spawning itself as a ghost
 	cmd := exec.CommandContext(ctx, s.executable, s.args...)
 
 	stdin, err := cmd.StdinPipe()

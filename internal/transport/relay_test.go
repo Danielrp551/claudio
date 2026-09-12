@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,7 +34,17 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 
-	store, err := workspace.OpenStore(filepath.Join(t.TempDir(), "workspace.json"))
+	// Not t.TempDir. A relay handler can still be finishing its own shutdown,
+	// and writing the store one last time, while the test framework is removing
+	// the directory, which fails the test for a reason that has nothing to do
+	// with what it is checking.
+	dir, err := os.MkdirTemp("", "claudio-relay-test-")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	store, err := workspace.OpenStore(filepath.Join(dir, "workspace.json"))
 	if err != nil {
 		t.Fatalf("OpenStore: %v", err)
 	}
@@ -171,8 +182,8 @@ func TestTheRelayNeverSeesPlaintext(t *testing.T) {
 	alice, _ := identity.Generate()
 	bob, _ := identity.Generate()
 
-	const secret = "no le digas a nadie"
-	payload := []byte(`{"text":"` + secret + `"}`)
+	const needle = "no le digas a nadie"
+	payload := []byte(`{"text":"` + needle + `"}`)
 
 	env, err := alice.Seal(bob.Public(), payload)
 	if err != nil {
@@ -186,7 +197,7 @@ func TestTheRelayNeverSeesPlaintext(t *testing.T) {
 		"sender":     env.Sender,
 		"signature":  env.Signature,
 	} {
-		if bytes.Contains(field, []byte(secret)) {
+		if bytes.Contains(field, []byte(needle)) {
 			t.Errorf("the %s of an envelope carries the plaintext", name)
 		}
 	}

@@ -149,8 +149,9 @@ func TestFingerprintIsStableAndDistinct(t *testing.T) {
 	a, _ := Generate()
 	b, _ := Generate()
 
-	if a.Fingerprint() != a.Fingerprint() {
-		t.Error("a fingerprint must be stable")
+	first, second := a.Fingerprint(), a.Fingerprint()
+	if first != second {
+		t.Errorf("a fingerprint must be stable, got %q then %q", first, second)
 	}
 	if a.Fingerprint() == b.Fingerprint() {
 		t.Error("two identities must not share a fingerprint")
@@ -210,7 +211,7 @@ func FuzzOpen(f *testing.F) {
 
 	f.Add(env.Sender, env.Ephemeral, env.Nonce, env.Ciphertext, env.Signature)
 
-	f.Fuzz(func(t *testing.T, sender, ephemeral, nonce, ciphertext, signature []byte) {
+	f.Fuzz(func(_ *testing.T, sender, ephemeral, nonce, ciphertext, signature []byte) {
 		// Open must return a value or an error for any input at all. A panic
 		// here would be reachable by anybody who can reach the relay.
 		_, _, _ = bob.Open(Envelope{

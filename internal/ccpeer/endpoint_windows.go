@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -70,6 +71,10 @@ func (windowsEndpoint) Dial(ctx context.Context, path string) (net.Conn, error) 
 func (windowsEndpoint) ProcStart(pid int) (string, error) {
 	const queryLimitedInformation = 0x1000
 
+	if pid <= 0 || int64(pid) > math.MaxUint32 {
+		return "", fmt.Errorf("ccpeer: %d is not a usable process id", pid)
+	}
+
 	h, err := syscall.OpenProcess(queryLimitedInformation, false, uint32(pid))
 	if err != nil {
 		return "", fmt.Errorf("ccpeer: opening process %d: %w", pid, err)
@@ -87,6 +92,10 @@ func (windowsEndpoint) ProcStart(pid int) (string, error) {
 
 func (windowsEndpoint) ProcessAlive(pid int) bool {
 	const queryLimitedInformation = 0x1000
+
+	if pid <= 0 || int64(pid) > math.MaxUint32 {
+		return false
+	}
 
 	h, err := syscall.OpenProcess(queryLimitedInformation, false, uint32(pid))
 	if err != nil {

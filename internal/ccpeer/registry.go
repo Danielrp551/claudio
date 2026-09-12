@@ -61,22 +61,22 @@ func NewRegistry(platform LocalEndpoint, dirs ...string) (*Registry, error) {
 	var problems []error
 
 	for _, d := range dirs {
-		real, err := filepath.EvalSymlinks(d)
+		resolved, err := filepath.EvalSymlinks(d)
 		if err != nil {
 			// A directory that does not exist yet is not an error. Claude Code
 			// creates it on its first run, and we may simply be early.
 			if errors.Is(err, os.ErrNotExist) {
-				real = filepath.Clean(d)
+				resolved = filepath.Clean(d)
 			} else {
 				problems = append(problems, fmt.Errorf("%s: %w", d, err))
 				continue
 			}
 		}
-		if seen[real] {
+		if seen[resolved] {
 			continue
 		}
-		seen[real] = true
-		kept = append(kept, real)
+		seen[resolved] = true
+		kept = append(kept, resolved)
 	}
 
 	if len(kept) == 0 {
@@ -349,7 +349,7 @@ func writeRecord(path string, rec Record) error {
 	name := tmp.Name()
 
 	if _, err := tmp.Write(blob); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		os.Remove(name)
 		return fmt.Errorf("ccpeer: writing a temporary record: %w", err)
 	}

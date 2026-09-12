@@ -44,7 +44,7 @@ func runTests(m *testing.M) (int, error) {
 		claudioBinary += ".exe"
 	}
 
-	build := exec.Command("go", "build", "-o", claudioBinary, "../../cmd/claudio")
+	build := exec.CommandContext(context.Background(), "go", "build", "-o", claudioBinary, "../../cmd/claudio")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		return 0, fmt.Errorf("building the test binary: %w", err)

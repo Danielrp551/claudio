@@ -282,7 +282,7 @@ func (c *RelayClient) runOnce(ctx context.Context) error {
 		return fmt.Errorf("transport: dialling the relay: %w", err)
 	}
 	conn.SetReadLimit(8 << 20)
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	if err := c.handshake(ctx, conn); err != nil {
 		return err

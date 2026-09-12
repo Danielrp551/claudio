@@ -44,8 +44,16 @@ jobs:
       - name: Build
         run: go build ./...
 
-      - name: Test
+      # The race detector needs cgo and a working 64 bit C compiler, which is
+      # the default on the Linux and macOS runners and not on the Windows one.
+      # Windows still runs every test, without the detector.
+      - name: Test with the race detector
+        if: runner.os != 'Windows'
         run: go test -race -count=1 ./...
+
+      - name: Test
+        if: runner.os == 'Windows'
+        run: go test -count=1 ./...
 
   lint:
     name: lint

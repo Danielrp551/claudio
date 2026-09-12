@@ -34,9 +34,11 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 )
@@ -230,11 +232,14 @@ func signedBytes(env Envelope, recipientAgreement []byte) []byte {
 	} {
 		// Length prefixing keeps concatenation unambiguous, so no combination of
 		// parts can be rearranged into the same digest.
+		if len(part) > math.MaxUint32 {
+			// Unreachable with any envelope this protocol accepts, and a silent
+			// truncation here would break the unambiguity the prefix exists for.
+			panic("identity: a signed part is larger than the length prefix can carry")
+		}
 		var l [4]byte
-		l[0] = byte(len(part) >> 24)
-		l[1] = byte(len(part) >> 16)
-		l[2] = byte(len(part) >> 8)
-		l[3] = byte(len(part))
+		//nolint:gosec // the length is guarded against overflow immediately above
+		binary.BigEndian.PutUint32(l[:], uint32(len(part)))
 		h.Write(l[:])
 		h.Write(part)
 	}

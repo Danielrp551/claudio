@@ -23,7 +23,14 @@ install: ## Install the binary into GOBIN
 	go install -trimpath -ldflags "$(LDFLAGS)" $(CMD)
 
 .PHONY: test
-test: ## Run tests with the race detector
+test: ## Run tests
+	go test -count=1 $(PKG)
+
+.PHONY: race
+race: ## Run tests with the race detector
+	@# The race detector needs cgo and a working 64 bit C compiler. That is the
+	@# default on Linux and macOS and often missing on Windows, so this is its own
+	@# target rather than something that makes an ordinary test run fail.
 	go test -race -count=1 $(PKG)
 
 .PHONY: cover
@@ -55,7 +62,10 @@ tidy: ## Tidy the module and fail if it changed
 		{ echo "go.mod or go.sum changed, commit the result of go mod tidy"; exit 1; }
 
 .PHONY: check
-check: fmt-check vet lint test ## Everything CI runs
+check: fmt-check vet lint test ## What to run before pushing
+
+.PHONY: check-all
+check-all: check race ## Everything CI runs, race detector included
 
 .PHONY: clean
 clean: ## Remove build artefacts

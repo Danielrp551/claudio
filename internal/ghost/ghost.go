@@ -74,7 +74,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	defer inbox.Close()
+	defer func() { _ = inbox.Close() }()
 
 	pub, err := reg.Publish(init.Name, path)
 	if err != nil {
