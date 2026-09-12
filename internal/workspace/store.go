@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -205,12 +206,39 @@ func (s *Store) persistLocked() error {
 		os.Remove(tmp)
 		return fmt.Errorf("workspace: tightening the temporary store: %w", err)
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
+	if err := installStore(tmp, s.path); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("workspace: installing the store: %w", err)
 	}
 	s.stampLocked()
 	return nil
+}
+
+// installStore renames the finished file over the old one, retrying a refusal
+// that is about timing rather than about the data.
+//
+// Windows refuses to replace a file while somebody else has it open, and a
+// reader halfway through opening it is enough. That refusal arrives as a
+// permission error, and it is transient: the same rename a few milliseconds
+// later succeeds. Treating it as final would mean losing a write for a reason
+// that has nothing to do with what was being written, which is what CI caught
+// with eight writers going at one workspace at once.
+//
+// The retries cost nothing on the Unix platforms, where a rename over an open
+// file has always been allowed and this loop runs exactly once.
+func installStore(from, to string) error {
+	var err error
+	for attempt := range 25 {
+		if err = os.Rename(from, to); err == nil {
+			return nil
+		}
+		if !errors.Is(err, fs.ErrPermission) {
+			return err
+		}
+		// Short and growing. The holder is closing a file, not doing work.
+		time.Sleep(time.Duration(attempt+1) * 4 * time.Millisecond)
+	}
+	return err
 }
 
 // stampLocked records what the file looks like now, so the next reader can tell
