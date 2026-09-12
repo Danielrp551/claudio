@@ -74,6 +74,14 @@ On Linux it is a counter of ticks since the machine booted. It is not convertibl
 **`pidDomain` on Linux encodes the process id namespace**, which is deliberate. A process id only
 means something inside its namespace, so sessions in different containers must not verify each other.
 
+**A Unix socket address is not a path of any length.** It has to fit in `sun_path`, which is 108
+bytes on Linux and 104 on macOS, the terminating NUL included. The difference bites on macOS, where
+the per user temporary directory sits under `/var/folders/<...>/T/` and spends 46 of those bytes
+before anything of ours. A path that Linux binds without trouble fails there with `EINVAL`, which
+arrives as the unhelpful `invalid argument`. This tool checks the length before binding and falls
+back to a short directory under `/tmp` when the preferred one does not leave room, which is the same
+thing Claude Code does with `/tmp/cc-socks-<uid>`.
+
 ## What the sender verifies before delivering
 
 Reconstructed from the binary and confirmed by observation. The sender opens a preflight connection,

@@ -8,6 +8,13 @@ import (
 	"strings"
 )
 
+// maxSocketPath is the longest socket path Linux can bind.
+//
+// syscall.RawSockaddrUnix carries Path [108]int8 here, and for a name that is a
+// real path rather than an abstract one the standard library refuses a length
+// that fills the array, because the terminating NUL needs the last byte.
+const maxSocketPath = 107
+
 type linuxEndpoint struct{ unixEndpoint }
 
 func newPlatform() LocalEndpoint { return linuxEndpoint{} }
