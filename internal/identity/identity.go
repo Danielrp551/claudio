@@ -262,6 +262,39 @@ func newAEAD(key []byte) (cipher.AEAD, error) {
 	return aead, nil
 }
 
+// ChallengeBytes is what a member signs to prove who it is to a relay.
+//
+// It is bound to the workspace the member asked to join, so a signature
+// collected by one relay cannot be replayed at another. Both sides call this
+// function rather than building the bytes themselves, because a binding the two
+// ends disagree about is a binding that does nothing.
+func ChallengeBytes(workspace string, nonce []byte) []byte {
+	out := make([]byte, 0, len(workspace)+len(nonce)+32)
+	out = append(out, []byte("claudio/v1 relay challenge ")...)
+	out = append(out, []byte(workspace)...)
+	out = append(out, ' ')
+	return append(out, nonce...)
+}
+
+// SignChallenge answers a relay challenge.
+func (i *Identity) SignChallenge(workspace string, nonce []byte) []byte {
+	return ed25519.Sign(i.signing, ChallengeBytes(workspace, nonce))
+}
+
+// VerifyChallenge checks an answer to a relay challenge.
+func VerifyChallenge(pub Public, workspace string, nonce, signature []byte) bool {
+	if len(pub.Signing) != ed25519.PublicKeySize || len(signature) != ed25519.SignatureSize {
+		return false
+	}
+	return ed25519.Verify(pub.Signing, ChallengeBytes(workspace, nonce), signature)
+}
+
+// SameSigner reports whether a key identifies this member, in constant time.
+func (p Public) SameSigner(key []byte) bool {
+	return len(key) == ed25519.PublicKeySize &&
+		subtle.ConstantTimeCompare(p.Signing, key) == 1
+}
+
 // Equal reports whether two public identities are the same, in constant time.
 func Equal(a, b Public) bool {
 	return subtle.ConstantTimeCompare(a.Signing, b.Signing) == 1 &&
