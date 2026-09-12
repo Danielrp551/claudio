@@ -120,7 +120,10 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	s.log.Info("a connector joined", "member", c.memberID, "workspace", c.workspaceID)
 
-	if err := s.serve(ctx, c); err != nil && !isNormalClose(err) {
+	// serve runs until the connection ends, so it always has something to say
+	// about why. A close the other side performed politely is not a problem and
+	// is not worth a warning.
+	if err := s.serve(ctx, c); !isNormalClose(err) {
 		s.log.Warn("a connector dropped", "member", c.memberID, "error", err)
 	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
@@ -387,6 +390,10 @@ func (c *client) write(ctx context.Context, msg Message) error {
 }
 
 func isNormalClose(err error) bool {
+	// Nothing to report is the most normal ending there is.
+	if err == nil {
+		return true
+	}
 	status := websocket.CloseStatus(err)
 	return status == websocket.StatusNormalClosure ||
 		status == websocket.StatusGoingAway ||

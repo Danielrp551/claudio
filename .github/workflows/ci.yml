@@ -63,9 +63,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - uses: golangci/golangci-lint-action@v6
+      # The action major has to match the configuration format. .golangci.yml
+      # declares version 2, which only golangci-lint v2 understands, and only
+      # action v7 and later install it. The linter version is pinned rather than
+      # left as latest so a release upstream cannot turn a green branch red on
+      # its own, and so the version here is the one contributors run locally.
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.13.2
 
   tidy:
     name: module is tidy
