@@ -27,11 +27,11 @@ Workspace commands:
   workspace   create and inspect workspaces
   invite      create an invitation
   join        redeem an invitation
+  expose      share a local session with the workspace
+  unexpose    stop sharing a local session
   sessions    list sessions reachable in a workspace
-  promote     give a remote session its own native peer
-  demote      release the process backing a native peer
   trust       set the trust level for a person, workspace, or session
-  policy      set promotion mode and the ghost cap
+  policy      set promotion mode and the cap on native peers
   status      show what this machine is running and why
   doctor      report what this machine can and cannot do
 
@@ -84,10 +84,32 @@ func Run(ctx context.Context, env Env, args []string) error {
 		return nil
 	case "ghost":
 		return runGhost(ctx, env, rest)
-	case "daemon", "mcp", "relay",
-		"workspace", "invite", "join", "sessions",
-		"promote", "demote", "trust", "policy", "status", "doctor":
-		return fmt.Errorf("%s: %w", name, ErrNotImplemented)
+	case "daemon":
+		return runDaemon(ctx, env, rest)
+	case "relay":
+		return runRelay(ctx, env, rest)
+	case "workspace":
+		return runWorkspace(ctx, env, rest)
+	case "invite":
+		return runInvite(ctx, env, rest)
+	case "join":
+		return runJoin(ctx, env, rest)
+	case "expose":
+		return runExpose(ctx, env, rest)
+	case "unexpose":
+		return runUnexpose(ctx, env, rest)
+	case "sessions":
+		return runSessions(ctx, env, rest)
+	case "trust":
+		return runTrust(ctx, env, rest)
+	case "policy":
+		return runPolicy(ctx, env, rest)
+	case "status":
+		return runStatus(ctx, env, rest)
+	case "doctor":
+		return runDoctor(ctx, env, rest)
+	case "mcp":
+		return runMCP(ctx, env, rest)
 	default:
 		return fmt.Errorf("unknown command %q, run \"claudio help\"", name)
 	}

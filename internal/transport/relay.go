@@ -141,10 +141,17 @@ func (c *RelayClient) Roster() []daemon.RemoteSession {
 
 // Expose tells the relay which local sessions this machine shares. It is safe to
 // call before a connection exists, and the value is republished on every
-// reconnect.
-func (c *RelayClient) Expose(sessions []workspace.Session) {
+// reconnect without the daemon having to ask again.
+func (c *RelayClient) Expose(sessions []daemon.ExposedSession) {
+	out := make([]workspace.Session, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, workspace.Session{
+			ID: s.ID, Name: s.Name, CWD: s.CWD, Status: s.Status,
+		})
+	}
+
 	c.mu.Lock()
-	c.exposed = sessions
+	c.exposed = out
 	conn := c.conn
 	c.mu.Unlock()
 
@@ -467,11 +474,13 @@ func (c *RelayClient) applyEnvelope(msg relay.Message) {
 	c.mu.RUnlock()
 
 	delivery := daemon.Delivery{
-		From:      from,
-		ToSession: payload.ToSession,
-		Text:      payload.Text,
-		FromMode:  payload.FromMode,
-		MsgID:     payload.MsgID,
+		From:          from,
+		ToSession:     payload.ToSession,
+		Text:          payload.Text,
+		FromMode:      payload.FromMode,
+		MsgID:         payload.MsgID,
+		ProposedTrust: sender.Trust,
+		Workspace:     c.opts.Workspace,
 	}
 
 	select {

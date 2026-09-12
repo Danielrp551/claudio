@@ -84,6 +84,7 @@ func NewServer(store *workspace.Store, log *slog.Logger) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/connect", s.handleConnect)
+	mux.HandleFunc("/join", s.handleJoin)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))

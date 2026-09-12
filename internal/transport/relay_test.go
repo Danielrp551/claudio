@@ -119,8 +119,8 @@ func TestMessageTravelsSealedBetweenMembers(t *testing.T) {
 	alice := f.dial(t, f.alice, "alice", "alice-machine")
 	bob := f.dial(t, f.bob, "bob", "bob-machine")
 
-	bob.Expose([]workspace.Session{{ID: "bob-api", Name: "api", Status: "idle"}})
-	alice.Expose([]workspace.Session{{ID: "alice-web", Name: "web", Status: "idle"}})
+	bob.Expose([]daemon.ExposedSession{{ID: "bob-api", Name: "api", Status: "idle"}})
+	alice.Expose([]daemon.ExposedSession{{ID: "alice-web", Name: "web", Status: "idle"}})
 
 	target := waitForRoster(t, alice, "api")
 

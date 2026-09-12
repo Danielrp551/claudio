@@ -48,6 +48,29 @@ type Delivery struct {
 	// FromMode is the permission class the sender declared.
 	FromMode string `json:"fromMode"`
 	MsgID    string `json:"msgId"`
+
+	// ProposedTrust is what the workspace suggests for this sender. It is a
+	// proposal and nothing more: the receiving machine resolves the level it
+	// actually uses by taking the most restrictive of every opinion, including
+	// its own. See ADR-0006.
+	ProposedTrust string `json:"proposedTrust,omitempty"`
+
+	// Workspace is the slug the message came through, which the framing names so
+	// the reader knows where a stranger came from.
+	Workspace string `json:"workspace,omitempty"`
+}
+
+// ExposedSession is a local Claude Code session this machine shares.
+//
+// Exposure is per session and opt in. Nothing is published because a connector
+// happens to run on the machine.
+type ExposedSession struct {
+	// ID is stable for this machine and session, so reconnecting replaces an
+	// entry rather than adding a second one.
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	CWD    string `json:"cwd,omitempty"`
+	Status string `json:"status"`
 }
 
 // Transport carries messages between machines.
@@ -68,6 +91,11 @@ type Transport interface {
 	// it rather than subscribing, because the set changes slowly and a snapshot
 	// is simpler to reason about than a stream of edits.
 	Roster() []RemoteSession
+
+	// Expose publishes the local sessions this machine shares. The daemon calls
+	// it whenever that set changes, and a transport is expected to republish it
+	// after a reconnect without being asked again.
+	Expose(sessions []ExposedSession)
 
 	// Close stops the transport and closes the delivery channel.
 	Close() error

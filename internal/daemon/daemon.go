@@ -2,6 +2,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +15,7 @@ import (
 	"time"
 
 	"github.com/danielrp551/claudio/internal/ccpeer"
+	"github.com/danielrp551/claudio/internal/trust"
 )
 
 // Promotion modes.
@@ -64,6 +68,32 @@ func (p Policy) withDefaults() Policy {
 	return p
 }
 
+// TrustSettings is this machine's half of the trust decision.
+//
+// Everything here narrows. A workspace can propose a level and a member can be
+// given one, but the values below are the ones their owner controls, and the
+// effective level is the most restrictive of all of them. Nobody raises your
+// level from somewhere else. See ADR-0006.
+type TrustSettings struct {
+	// Workspace applies to everybody in this workspace.
+	Workspace string `json:"workspace,omitempty"`
+	// People is keyed by the display name of a member.
+	People map[string]string `json:"people,omitempty"`
+	// Sessions is keyed by the name of a local Claude Code session, so the one
+	// that touches production can be stricter than the rest of the machine.
+	Sessions map[string]string `json:"sessions,omitempty"`
+}
+
+// For resolves the level that applies to one message.
+func (t TrustSettings) For(proposed, person, localSession string) string {
+	return trust.Resolve(
+		proposed,
+		t.Workspace,
+		t.People[person],
+		t.Sessions[localSession],
+	)
+}
+
 // Options configures a daemon. Only Transport has no working default.
 type Options struct {
 	Platform     ccpeer.LocalEndpoint
@@ -73,9 +103,26 @@ type Options struct {
 	GhostArgs    []string
 	Workspace    string
 	Policy       Policy
+	Trust        TrustSettings
 	Transport    Transport
 	Logger       *slog.Logger
 	PollInterval time.Duration
+
+	// MachineID makes an exposed session identifier stable across restarts.
+	MachineID string
+
+	// Exposes decides which local sessions this machine shares. A nil value
+	// shares nothing, because exposure is opt in and defaulting to share would
+	// be the wrong way round.
+	Exposes func(name string) bool
+
+	// StatusPath is where a snapshot is written after every poll, so the status
+	// command can report what is running even when the connector is not.
+	StatusPath string
+
+	// ControlAddressPath is where the connector publishes the path of its
+	// control endpoint, so the MCP server and the command line can find it.
+	ControlAddressPath string
 }
 
 // Daemon is the connector that runs once per machine.
@@ -87,11 +134,12 @@ type Daemon struct {
 	index    *orphanIndex
 	log      *slog.Logger
 
-	mu       sync.Mutex
-	local    []ccpeer.Record
-	peers    map[string]string    // peer name to remote session id
-	lastUsed map[string]time.Time // remote session id to last traffic
-	degraded string
+	mu        sync.Mutex
+	local     []ccpeer.Record
+	peers     map[string]string    // peer name to remote session id
+	exposedTo map[string]string    // exposed session id to local session name
+	lastUsed  map[string]time.Time // remote session id to last traffic
+	degraded  string
 }
 
 // New builds a daemon. It does not start anything.
@@ -133,14 +181,15 @@ func New(opts Options) (*Daemon, error) {
 	}
 
 	d := &Daemon{
-		opts:     opts,
-		platform: opts.Platform,
-		registry: registry,
-		client:   ccpeer.NewClient(opts.Platform, registry, opts.Logger),
-		index:    index,
-		log:      opts.Logger,
-		peers:    map[string]string{},
-		lastUsed: map[string]time.Time{},
+		opts:      opts,
+		platform:  opts.Platform,
+		registry:  registry,
+		client:    ccpeer.NewClient(opts.Platform, registry, opts.Logger),
+		index:     index,
+		log:       opts.Logger,
+		peers:     map[string]string{},
+		exposedTo: map[string]string{},
+		lastUsed:  map[string]time.Time{},
 	}
 
 	if !opts.Platform.Verified() {
@@ -180,6 +229,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 		defer wg.Done()
 		d.routeInbound(ctx, sup)
 	}()
+
+	if d.opts.ControlAddressPath != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := d.serveControl(ctx, d.opts.ControlAddressPath); err != nil {
+				d.log.Error("the control endpoint stopped", "error", err)
+			}
+		}()
+	}
 
 	d.log.Info("connector is up",
 		"workspace", d.opts.Workspace,
@@ -223,7 +282,9 @@ func (d *Daemon) poll(ctx context.Context, sup *supervisor) {
 			return
 		case <-t.C:
 			d.refreshLocal()
+			d.publishExposed()
 			d.reconcile(sup)
+			d.writeStatus(sup)
 			t.Reset(d.opts.PollInterval)
 		}
 	}
@@ -251,6 +312,63 @@ func (d *Daemon) refreshLocal() {
 	d.mu.Lock()
 	d.local = kept
 	d.mu.Unlock()
+}
+
+// publishExposed tells the transport which local sessions this machine shares.
+func (d *Daemon) publishExposed() {
+	if d.opts.Exposes == nil {
+		return
+	}
+
+	d.mu.Lock()
+	local := make([]ccpeer.Record, len(d.local))
+	copy(local, d.local)
+	d.mu.Unlock()
+
+	exposed := make([]ExposedSession, 0, len(local))
+	index := make(map[string]string, len(local))
+	for _, s := range local {
+		if !d.opts.Exposes(s.Name) {
+			continue
+		}
+		id := d.opts.MachineID + ":" + s.Name
+		exposed = append(exposed, ExposedSession{
+			ID: id, Name: s.Name, CWD: s.CWD, Status: s.Status,
+		})
+		index[id] = s.Name
+	}
+
+	d.mu.Lock()
+	d.exposedTo = index
+	d.mu.Unlock()
+
+	d.opts.Transport.Expose(exposed)
+}
+
+// writeStatus leaves a snapshot on disk for the status command.
+//
+// A file rather than another endpoint. The status command is allowed to be a
+// poll interval behind, and not adding a second thing to bind and secure is
+// worth more than the freshness.
+func (d *Daemon) writeStatus(sup *supervisor) {
+	if d.opts.StatusPath == "" {
+		return
+	}
+
+	status := d.Snapshot()
+	status.Peers = sup.Peers()
+
+	blob, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := d.opts.StatusPath + ".tmp"
+	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, d.opts.StatusPath); err != nil {
+		os.Remove(tmp)
+	}
 }
 
 // reconcile makes the running peers match what the policy says they should be.
@@ -450,7 +568,16 @@ func (d *Daemon) routeInbound(ctx context.Context, sup *supervisor) {
 }
 
 func (d *Daemon) deliver(ctx context.Context, sup *supervisor, msg Delivery) error {
-	target, err := d.localSession(msg.ToSession)
+	// A message is addressed to the identifier this machine published, so it is
+	// translated back to the session name before anything is looked up.
+	d.mu.Lock()
+	name, known := d.exposedTo[msg.ToSession]
+	d.mu.Unlock()
+	if !known {
+		name = msg.ToSession
+	}
+
+	target, err := d.localSession(name)
 	if err != nil {
 		return err
 	}
@@ -469,8 +596,20 @@ func (d *Daemon) deliver(ctx context.Context, sup *supervisor, msg Delivery) err
 		return errors.New("no native peer is available to carry the reply address")
 	}
 
+	// The level is resolved here, on the receiving machine, from every opinion
+	// that applies. What it changes is the framing the text arrives in, which is
+	// the only thing that actually governs how the receiving model treats it.
+	// Permissions are untouched at every level.
+	level := d.opts.Trust.For(msg.ProposedTrust, msg.From.Person, target.Name)
+	framed := trust.Frame(level, trust.Sender{
+		Person:    msg.From.Person,
+		Session:   msg.From.Session,
+		Workspace: cmpOr(msg.Workspace, d.opts.Workspace),
+		Mode:      msg.FromMode,
+	}, msg.Text)
+
 	frame, err := ccpeer.NewFrame(ccpeer.FrameOptions{
-		Text:        msg.Text,
+		Text:        framed,
 		FromAddress: ccpeer.ReplyAddress(endpoint),
 		FromName:    peerName,
 		FromMode:    msg.FromMode,
@@ -486,8 +625,23 @@ func (d *Daemon) deliver(ctx context.Context, sup *supervisor, msg Delivery) err
 	// A successful write proves the bytes were accepted and nothing more, so
 	// this says handed over rather than delivered. See ADR-0007.
 	d.log.Info("message handed to a local session inbox",
-		"session", target.Name, "from", peerName, "msg_id", msg.MsgID)
+		"session", target.Name, "from", peerName, "trust", level, "msg_id", msg.MsgID)
 	return nil
+}
+
+func newMessageID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+func cmpOr(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 func (d *Daemon) localSession(name string) (ccpeer.Record, error) {

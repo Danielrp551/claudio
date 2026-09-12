@@ -46,16 +46,20 @@ func socketDir() (string, error) {
 	return dir, nil
 }
 
-func (unixEndpoint) NewInboxPath() (string, error) {
+func (u unixEndpoint) NewInboxPath() (string, error) {
+	return u.NewLocalPath("inbox")
+}
+
+func (unixEndpoint) NewLocalPath(kind string) (string, error) {
 	dir, err := socketDir()
 	if err != nil {
 		return "", err
 	}
 	suffix := make([]byte, 8)
 	if _, err := rand.Read(suffix); err != nil {
-		return "", fmt.Errorf("ccpeer: generating an inbox name: %w", err)
+		return "", fmt.Errorf("ccpeer: generating an endpoint name: %w", err)
 	}
-	name := fmt.Sprintf("%d-%s.sock", os.Getpid(), hex.EncodeToString(suffix))
+	name := fmt.Sprintf("%s-%d-%s.sock", kind, os.Getpid(), hex.EncodeToString(suffix))
 	return filepath.Join(dir, name), nil
 }
 

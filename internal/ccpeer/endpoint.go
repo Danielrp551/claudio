@@ -32,8 +32,18 @@ type LocalEndpoint interface {
 	// it is an invitation to be careful and to say so to the user.
 	Verified() bool
 
-	// NewInboxPath returns a fresh, unused inbox path for a process owned by
-	// this user, creating the containing directory when the platform needs one.
+	// NewLocalPath returns a fresh, unused local endpoint path for a process
+	// owned by this user, creating the containing directory when the platform
+	// needs one.
+	//
+	// The kind becomes part of the name. It exists so that an endpoint this tool
+	// binds for its own purposes is not called something that looks like one of
+	// Claude Code's, which would be misleading to anybody reading the list of
+	// open pipes on a machine.
+	NewLocalPath(kind string) (string, error)
+
+	// NewInboxPath returns a path for an endpoint a Claude Code session will
+	// connect to.
 	NewInboxPath() (string, error)
 
 	// Listen binds path so Claude Code sessions can connect to it.

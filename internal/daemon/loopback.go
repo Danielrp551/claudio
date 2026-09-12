@@ -26,6 +26,9 @@ type Loopback struct {
 
 	deliveries chan Delivery
 
+	exposedMu sync.Mutex
+	exposed   []ExposedSession
+
 	closeOnce sync.Once
 	closed    chan struct{}
 }
@@ -87,6 +90,23 @@ func (l *Loopback) Send(ctx context.Context, msg Outbound) error {
 
 // Deliveries yields the answers this transport produces.
 func (l *Loopback) Deliveries() <-chan Delivery { return l.deliveries }
+
+// Expose records what the daemon shares. A loopback has nobody to tell, so it
+// only keeps the value for a test to inspect.
+func (l *Loopback) Expose(sessions []ExposedSession) {
+	l.exposedMu.Lock()
+	defer l.exposedMu.Unlock()
+	l.exposed = sessions
+}
+
+// Exposed returns what the daemon last shared.
+func (l *Loopback) Exposed() []ExposedSession {
+	l.exposedMu.Lock()
+	defer l.exposedMu.Unlock()
+	out := make([]ExposedSession, len(l.exposed))
+	copy(out, l.exposed)
+	return out
+}
 
 // Roster returns the remote sessions this transport pretends to reach.
 func (l *Loopback) Roster() []RemoteSession {

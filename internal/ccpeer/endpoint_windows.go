@@ -36,12 +36,16 @@ func (windowsEndpoint) Verified() bool { return true }
 
 func (windowsEndpoint) RequiresAuthLine() bool { return true }
 
-func (windowsEndpoint) NewInboxPath() (string, error) {
+func (w windowsEndpoint) NewInboxPath() (string, error) {
+	return w.NewLocalPath("cc-msg")
+}
+
+func (windowsEndpoint) NewLocalPath(kind string) (string, error) {
 	suffix := make([]byte, 16)
 	if _, err := rand.Read(suffix); err != nil {
-		return "", fmt.Errorf("ccpeer: generating an inbox name: %w", err)
+		return "", fmt.Errorf("ccpeer: generating an endpoint name: %w", err)
 	}
-	return pipePrefix + "cc-msg-" + hex.EncodeToString(suffix), nil
+	return pipePrefix + kind + "-" + hex.EncodeToString(suffix), nil
 }
 
 func (windowsEndpoint) Listen(path string) (net.Listener, error) {
