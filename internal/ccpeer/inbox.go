@@ -38,7 +38,8 @@ type Inbox struct {
 	// sends an authentication line is checked against it. A connection that
 	// sends no authentication line is accepted, which is what a real Claude Code
 	// session does when it cannot find our key file.
-	token string
+	tokenMu sync.Mutex
+	token   string
 
 	closeOnce sync.Once
 	closeErr  error
@@ -73,6 +74,27 @@ func Listen(platform LocalEndpoint, path, token string, log *slog.Logger) (*Inbo
 
 // Addr returns the path this inbox is bound to.
 func (i *Inbox) Addr() string { return i.ln.Addr().String() }
+
+// SetToken installs the token incoming authentication lines are checked against.
+//
+// It exists because of an ordering constraint. The endpoint must be bound before
+// the record that points at it is published, so that no peer can read a record
+// and fail to connect, but the token only exists once the record has been
+// published. Binding first and installing the token a moment later closes the
+// larger window at the cost of a smaller one, during which a connection is
+// accepted without a check. That is the same treatment a real session gets when
+// it cannot find our key file, so it is not a new exposure.
+func (i *Inbox) SetToken(token string) {
+	i.tokenMu.Lock()
+	defer i.tokenMu.Unlock()
+	i.token = token
+}
+
+func (i *Inbox) expectedToken() string {
+	i.tokenMu.Lock()
+	defer i.tokenMu.Unlock()
+	return i.token
+}
 
 // Frames yields every frame that arrives. The channel closes when the inbox has
 // stopped and every connection has drained.
@@ -163,11 +185,12 @@ func (i *Inbox) checkAuth(line []byte) (ok, handled bool) {
 	if err := json.Unmarshal(line, &a); err != nil || a.Type != "auth" {
 		return false, false
 	}
-	if i.token == "" {
+	want := i.expectedToken()
+	if want == "" {
 		// We published no token, so there is nothing to check against.
 		return true, true
 	}
-	return a.Token == i.token, true
+	return a.Token == want, true
 }
 
 // Close stops accepting and waits for every connection to finish. After it
