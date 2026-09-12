@@ -41,6 +41,12 @@ var (
 type Store struct {
 	path string
 
+	// loadedAt and loadedSize describe the file as it was when this process last
+	// read it, so a reader can tell in one stat whether somebody else has
+	// written since.
+	loadedAt   time.Time
+	loadedSize int64
+
 	mu          sync.RWMutex
 	Workspaces  map[string]*Workspace  `json:"workspaces"`
 	Members     map[string]*Member     `json:"members"`
@@ -70,7 +76,95 @@ func OpenStore(path string) (*Store, error) {
 	if err := json.Unmarshal(raw, s); err != nil {
 		return nil, fmt.Errorf("workspace: parsing %s: %w", path, err)
 	}
+	s.stampLocked()
 	return s, nil
+}
+
+// beginWrite opens a read, change and write cycle against the file.
+//
+// The mutex the caller already holds keeps the goroutines of this process out of
+// each other's way. This is the other half: a lock every process shares, and a
+// reread inside it. Both are needed. Without the lock, the relay and the command
+// line interleave their writes and one of them disappears. Without the reread,
+// the relay takes the lock and then writes a copy of the workspace it loaded at
+// startup, which loses the same change with better timing.
+//
+// The returned function must be called when the cycle ends.
+func (s *Store) beginWrite() (func(), error) {
+	l, err := acquire(s.path)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.reloadLocked(); err != nil {
+		l.release()
+		return nil, err
+	}
+	return l.release, nil
+}
+
+// refreshIfChangedLocked picks up what another process wrote, for a reader.
+//
+// No file lock here, and that is safe rather than sloppy: every write lands
+// through a rename, so a reader sees the whole previous store or the whole new
+// one and never a mixture. Checking the modification time and the size first
+// means the common case, where nothing changed, costs one stat.
+func (s *Store) refreshIfChangedLocked() {
+	if s.path == "" {
+		return
+	}
+
+	info, err := os.Stat(s.path)
+	if err != nil {
+		return
+	}
+	if info.ModTime().Equal(s.loadedAt) && info.Size() == s.loadedSize {
+		return
+	}
+	if err := s.reloadLocked(); err != nil {
+		// Answering from memory beats refusing to answer. The next write takes
+		// the lock and reports the problem where it can be acted on.
+		return
+	}
+}
+
+// reloadLocked replaces what is in memory with what is on disk.
+//
+// A missing file is not an error: it is a store nobody has written yet, and the
+// empty maps already in memory are the right answer.
+func (s *Store) reloadLocked() error {
+	if s.path == "" {
+		return nil
+	}
+
+	s.stampLocked()
+
+	raw, err := os.ReadFile(s.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("workspace: rereading %s: %w", s.path, err)
+	}
+
+	// Decoded into a fresh value first, so a corrupt file cannot leave this
+	// process holding half a store.
+	fresh := &Store{
+		Workspaces:  map[string]*Workspace{},
+		Members:     map[string]*Member{},
+		Invitations: map[string]*Invitation{},
+		Machines:    map[string]*Machine{},
+		Sessions:    map[string]*Session{},
+	}
+	if err := json.Unmarshal(raw, fresh); err != nil {
+		return fmt.Errorf("workspace: parsing %s: %w", s.path, err)
+	}
+
+	s.Workspaces = fresh.Workspaces
+	s.Members = fresh.Members
+	s.Invitations = fresh.Invitations
+	s.Machines = fresh.Machines
+	s.Sessions = fresh.Sessions
+	return nil
 }
 
 // persistLocked writes through a temporary file and renames, so a reader never
@@ -87,15 +181,48 @@ func (s *Store) persistLocked() error {
 	if err != nil {
 		return fmt.Errorf("workspace: encoding the store: %w", err)
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, blob, 0o600); err != nil {
+	// A fresh temporary name each time rather than a fixed one. The file lock
+	// already keeps two writers apart, and this is what keeps the damage small
+	// if it ever does not: with one shared name, two writers interleave inside
+	// the same temporary file and the rename installs a store that is half of
+	// each, which is a corrupt workspace rather than a lost change.
+	f, err := os.CreateTemp(filepath.Dir(s.path), filepath.Base(s.path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("workspace: creating a temporary store: %w", err)
+	}
+	tmp := f.Name()
+
+	if _, err := f.Write(blob); err != nil {
+		_ = f.Close()
+		os.Remove(tmp)
 		return fmt.Errorf("workspace: writing the store: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("workspace: closing the temporary store: %w", err)
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("workspace: tightening the temporary store: %w", err)
 	}
 	if err := os.Rename(tmp, s.path); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("workspace: installing the store: %w", err)
 	}
+	s.stampLocked()
 	return nil
+}
+
+// stampLocked records what the file looks like now, so the next reader can tell
+// whether anybody has written since without reading it again.
+func (s *Store) stampLocked() {
+	if s.path == "" {
+		return
+	}
+	if info, err := os.Stat(s.path); err == nil {
+		s.loadedAt = info.ModTime()
+		s.loadedSize = info.Size()
+	}
 }
 
 // CreateWorkspace makes a workspace and its owner in one step, because a
@@ -126,6 +253,12 @@ func (s *Store) CreateWorkspace(slug, name, ownerPerson string, ownerIdentity id
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	release, err := s.beginWrite()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
 
 	for _, w := range s.Workspaces {
 		if w.Slug == slug {
@@ -171,8 +304,9 @@ func (s *Store) CreateWorkspace(slug, name, ownerPerson string, ownerIdentity id
 
 // WorkspaceBySlug finds a workspace by the name people type.
 func (s *Store) WorkspaceBySlug(slug string) (*Workspace, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshIfChangedLocked()
 
 	slug = strings.ToLower(strings.TrimSpace(slug))
 	for _, w := range s.Workspaces {
@@ -200,6 +334,12 @@ func (s *Store) CreateInvitation(workspaceID, createdBy string, ttl time.Duratio
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	release, err := s.beginWrite()
+	if err != nil {
+		return "", nil, err
+	}
+	defer release()
 
 	if _, ok := s.Workspaces[workspaceID]; !ok {
 		return "", nil, fmt.Errorf("%w: workspace %s", ErrNotFound, workspaceID)
@@ -246,6 +386,12 @@ func (s *Store) Redeem(code, person string, who identity.Public) (*Member, *Work
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	release, err := s.beginWrite()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
+
 	now := time.Now().UTC()
 	for _, inv := range s.Invitations {
 		if subtle.ConstantTimeCompare([]byte(inv.CodeHash), []byte(want)) != 1 {
@@ -291,8 +437,9 @@ func (s *Store) Redeem(code, person string, who identity.Public) (*Member, *Work
 
 // MemberBySigning finds an active member by the key that identifies them.
 func (s *Store) MemberBySigning(workspaceID string, signing []byte) (*Member, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshIfChangedLocked()
 
 	for _, m := range s.Members {
 		if m.WorkspaceID != workspaceID {
@@ -311,8 +458,9 @@ func (s *Store) MemberBySigning(workspaceID string, signing []byte) (*Member, er
 // ListMembers lists everybody in a workspace, revoked included, because an audit
 // that hides revoked members is not an audit.
 func (s *Store) ListMembers(workspaceID string) []Member {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshIfChangedLocked()
 
 	out := make([]Member, 0, len(s.Members))
 	for _, m := range s.Members {
@@ -327,6 +475,12 @@ func (s *Store) ListMembers(workspaceID string) []Member {
 func (s *Store) Revoke(memberID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	release, err := s.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	m, ok := s.Members[memberID]
 	if !ok {
@@ -356,6 +510,12 @@ func (s *Store) SetTrust(memberID, trust string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	release, err := s.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	m, ok := s.Members[memberID]
 	if !ok {
 		return fmt.Errorf("%w: member %s", ErrNotFound, memberID)
@@ -369,6 +529,12 @@ func (s *Store) SetTrust(memberID, trust string) error {
 func (s *Store) ReplaceSessions(memberID string, machine Machine, sessions []Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	release, err := s.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	m, ok := s.Members[memberID]
 	if !ok || !m.Active() {
@@ -406,6 +572,12 @@ func (s *Store) DropMachine(machineID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	release, err := s.beginWrite()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	delete(s.Machines, machineID)
 	for id, sess := range s.Sessions {
 		if sess.MachineID == machineID {
@@ -418,8 +590,9 @@ func (s *Store) DropMachine(machineID string) error {
 // Roster lists the exposed sessions of a workspace, excluding the ones belonging
 // to the member asking, because nobody needs a native peer for their own session.
 func (s *Store) Roster(workspaceID, excludeMemberID string) []Session {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshIfChangedLocked()
 
 	members := map[string]bool{}
 	for _, m := range s.Members {
@@ -440,8 +613,9 @@ func (s *Store) Roster(workspaceID, excludeMemberID string) []Session {
 
 // Member returns one member by identifier.
 func (s *Store) Member(id string) (*Member, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshIfChangedLocked()
 
 	m, ok := s.Members[id]
 	if !ok {
@@ -452,8 +626,9 @@ func (s *Store) Member(id string) (*Member, error) {
 
 // Session returns one exposed session by identifier.
 func (s *Store) Session(id string) (*Session, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshIfChangedLocked()
 
 	sess, ok := s.Sessions[id]
 	if !ok {

@@ -38,6 +38,12 @@ All notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- Creating an invitation while the relay is running works, and no longer destroys
+  it. The two processes share one file, the relay never reread it, and the next
+  time it persisted anything it overwrote whatever the command line had written.
+  Every change now happens under a lock every process shares, with a reread
+  inside it, and readers pick up what somebody else wrote.
+
 - The connector no longer keeps running with endpoints nothing can reach. On the
   Unix platforms a socket lives in a directory that belongs to a login session,
   and systemd removes it when the last one ends, which happens to anybody who
