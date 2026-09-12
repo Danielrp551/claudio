@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,6 +25,11 @@ const (
 	ControlSend    = "send"
 	ControlPromote = "promote"
 	ControlDemote  = "demote"
+	// ControlPending lists the messages the hold gate is withholding.
+	ControlPending = "pending"
+	// ControlApprove delivers one of them, and ControlDrop discards it.
+	ControlApprove = "approve"
+	ControlDrop    = "drop"
 )
 
 // ControlRequest is one call.
@@ -38,6 +44,9 @@ type ControlRequest struct {
 
 	// Promote and demote.
 	Session string `json:"session,omitempty"`
+
+	// Approve and drop.
+	ID string `json:"id,omitempty"`
 }
 
 // ControlResponse is one answer.
@@ -46,6 +55,11 @@ type ControlResponse struct {
 	Error  string  `json:"error,omitempty"`
 	Status *Status `json:"status,omitempty"`
 	MsgID  string  `json:"msgId,omitempty"`
+
+	// Held is the answer to ControlPending, with Dropped saying how many were
+	// discarded because the gate filled up.
+	Held    []Held `json:"held,omitempty"`
+	Dropped int    `json:"dropped,omitempty"`
 }
 
 // AddressFile is where the connector writes the path of its control endpoint, so
@@ -198,8 +212,13 @@ func (d *Daemon) handleControl(ctx context.Context, req ControlRequest) ControlR
 		return ControlResponse{OK: true, Status: &status}
 
 	case ControlSend:
-		if req.To == "" || req.Text == "" {
-			return ControlResponse{Error: "a send needs a destination and some text"}
+		if req.To == "" || strings.TrimSpace(req.Text) == "" {
+			return ControlResponse{Error: "a send needs a destination and something to say"}
+		}
+		if n := len(req.Text); n > MaxMessageBytes {
+			return ControlResponse{Error: fmt.Sprintf(
+				"that message is %d bytes and the limit is %d. Send a summary and a "+
+					"path rather than the contents of a file", n, MaxMessageBytes)}
 		}
 		msg := Outbound{
 			To:          req.To,
@@ -214,6 +233,12 @@ func (d *Daemon) handleControl(ctx context.Context, req ControlRequest) ControlR
 		d.mu.Lock()
 		d.lastUsed[req.To] = time.Now()
 		d.mu.Unlock()
+
+		// Logged here as well as on the inbound side. Without this a message sent
+		// through the MCP fallback left no trace in the connector's log at all,
+		// so the one path somebody falls back to was the one nobody could see.
+		d.log.Info("message handed to the transport",
+			"to", req.To, "from", req.FromSession, "msg_id", msg.MsgID, "bytes", len(req.Text))
 
 		// The transport accepted it. That is not the same as anybody reading it,
 		// and the caller is told exactly that. See ADR-0007.
@@ -231,6 +256,29 @@ func (d *Daemon) handleControl(ctx context.Context, req ControlRequest) ControlR
 			return ControlResponse{Error: "demote needs a session"}
 		}
 		d.subscribe(req.Session, false)
+		return ControlResponse{OK: true}
+
+	case ControlPending:
+		items, dropped := d.held.List()
+		return ControlResponse{OK: true, Held: items, Dropped: dropped}
+
+	case ControlApprove:
+		if req.ID == "" {
+			return ControlResponse{Error: "approve needs the identifier of a held message"}
+		}
+		if err := d.approveByID(ctx, req.ID); err != nil {
+			return ControlResponse{Error: err.Error()}
+		}
+		return ControlResponse{OK: true}
+
+	case ControlDrop:
+		if req.ID == "" {
+			return ControlResponse{Error: "drop needs the identifier of a held message"}
+		}
+		if _, err := d.held.Take(req.ID); err != nil {
+			return ControlResponse{Error: err.Error()}
+		}
+		d.log.Info("a held message was discarded", "id", req.ID)
 		return ControlResponse{OK: true}
 
 	default:

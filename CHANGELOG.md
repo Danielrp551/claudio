@@ -36,7 +36,26 @@ All notable changes to this project are recorded here. The format follows
   and inside the member list the owner reads.
 - A message of nothing but whitespace is refused rather than delivered.
 
+### Added
+
+- The `hold` gate that ADR-0006 describes. A message from somebody held is kept
+  rather than delivered, `claudio pending` lists what is waiting, and
+  `claudio approve` or `claudio drop` decides. Held messages survive a restart,
+  and the queue is bounded and says how many it dropped.
+- `claudio workspace revoke` and `claudio workspace trust`, which the tool told
+  people about and could not do. Removing somebody previously meant stopping the
+  relay and editing JSON by hand.
+
 ### Fixed
+
+- One message size limit, checked where a message enters, with an error that
+  names it. There were six along the path and the lowest closed the connection
+  rather than answering, so a large message failed with "broken pipe" and no
+  mention of size.
+- The connector logs what it forwards on behalf of an MCP client, status explains
+  why sessions have no process of their own, and the relay log distinguishes an
+  expired invitation from a spent one. The answer a stranger gets stays the same
+  for every refusal.
 
 - Status and doctor say whether the relay can be reached, and whether it ever
   was. With the relay stopped they used to report the workspace as though

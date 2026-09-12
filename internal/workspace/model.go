@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/Danielrp551/claudio/internal/identity"
@@ -99,16 +100,25 @@ type Invitation struct {
 }
 
 // Usable reports whether an invitation can still be redeemed at a point in time.
-func (i Invitation) Usable(now time.Time) bool {
+func (i Invitation) Usable(now time.Time) bool { return i.Unusable(now) == "" }
+
+// Unusable says why an invitation cannot be redeemed, or returns an empty string
+// when it can.
+//
+// The reason is for the operator's log and never for the answer a stranger gets,
+// which stays identical for every refusal. The distinction matters in practice:
+// somebody says their code does not work, and without this nobody running the
+// relay can tell an expired code from a spent one or a typo.
+func (i Invitation) Unusable(now time.Time) string {
 	switch {
 	case i.RevokedAt != nil:
-		return false
+		return "it was revoked"
 	case !i.ExpiresAt.IsZero() && now.After(i.ExpiresAt):
-		return false
+		return "it expired at " + i.ExpiresAt.Format(time.RFC3339)
 	case i.MaxUses > 0 && i.Uses >= i.MaxUses:
-		return false
+		return fmt.Sprintf("it has been redeemed %d times of %d", i.Uses, i.MaxUses)
 	default:
-		return true
+		return ""
 	}
 }
 

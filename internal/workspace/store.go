@@ -397,8 +397,8 @@ func (s *Store) Redeem(code, person string, who identity.Public) (*Member, *Work
 		if subtle.ConstantTimeCompare([]byte(inv.CodeHash), []byte(want)) != 1 {
 			continue
 		}
-		if !inv.Usable(now) {
-			return nil, nil, ErrInvitationUnusable
+		if why := inv.Unusable(now); why != "" {
+			return nil, nil, fmt.Errorf("%w: %s", ErrInvitationUnusable, why)
 		}
 
 		// Somebody rejoining with the same identity gets their existing
@@ -432,7 +432,7 @@ func (s *Store) Redeem(code, person string, who identity.Public) (*Member, *Work
 		}
 		return m, w, nil
 	}
-	return nil, nil, ErrInvitationUnusable
+	return nil, nil, fmt.Errorf("%w: no invitation matches that code", ErrInvitationUnusable)
 }
 
 // MemberBySigning finds an active member by the key that identifies them.

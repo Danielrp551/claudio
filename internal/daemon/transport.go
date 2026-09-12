@@ -40,6 +40,22 @@ type Outbound struct {
 	MsgID string `json:"msgId"`
 }
 
+// MaxMessageBytes is the largest message this tool carries.
+//
+// There used to be six limits along the path, none of them coordinated or
+// documented: sixteen megabytes on the MCP server's input, four on the control
+// channel, one between a daemon and a ghost, eight in the supervisor, four in
+// the inbox, and sixteen kilobytes on the join endpoint. The lowest one on the
+// send path was the control channel, and going over it made the daemon close the
+// connection rather than answer, so a large message failed with "broken pipe"
+// and no mention of size at all.
+//
+// One megabyte is the limit now, checked where a message enters, with an error
+// that names it. It is far more than a message between two sessions needs and
+// comfortably inside every channel it has to cross, which is the property that
+// matters: the limit somebody hits should be the one that was explained to them.
+const MaxMessageBytes = 1 << 20
+
 // Delivery is a message arriving from a remote session.
 type Delivery struct {
 	// From is the remote session that sent it.

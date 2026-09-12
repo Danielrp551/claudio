@@ -174,6 +174,11 @@ func (s *Server) callTool(ctx context.Context, name string, raw json.RawMessage)
 		if args.To == "" || strings.TrimSpace(args.Text) == "" {
 			return "", errors.New("a send needs both a recipient and something to say")
 		}
+		if n := len(args.Text); n > daemon.MaxMessageBytes {
+			return "", fmt.Errorf(
+				"that message is %d bytes and the limit is %d. Send a summary and a path "+
+					"rather than the contents of a file", n, daemon.MaxMessageBytes)
+		}
 		// Checked here so a mistake is reported to whoever made it. The defence
 		// that actually holds is on the receiving machine, which cleans these
 		// fields no matter which client sent them.

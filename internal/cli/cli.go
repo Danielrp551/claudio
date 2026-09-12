@@ -24,13 +24,16 @@ Runtime commands:
   relay       run a relay server
 
 Workspace commands:
-  workspace   create and inspect workspaces
+  workspace   create, inspect, and administer workspaces
   invite      create an invitation
   join        redeem an invitation
   expose      share a local session with the workspace
   unexpose    stop sharing a local session
   sessions    list sessions reachable in a workspace
   trust       set the trust level for a person, workspace, or session
+  pending     list messages the hold gate is withholding
+  approve     deliver one of them
+  drop        discard one of them
   policy      set promotion mode and the cap on native peers
   status      show what this machine is running and why
   doctor      report what this machine can and cannot do
@@ -100,6 +103,12 @@ func Run(ctx context.Context, env Env, args []string) error {
 		return runUnexpose(ctx, env, rest)
 	case "sessions":
 		return runSessions(ctx, env, rest)
+	case "pending":
+		return runPending(ctx, env, args)
+	case "approve":
+		return runApprove(ctx, env, args)
+	case "drop":
+		return runDrop(ctx, env, args)
 	case "trust":
 		return runTrust(ctx, env, rest)
 	case "policy":

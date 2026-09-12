@@ -124,12 +124,17 @@ claude mcp add claudio -- claudio mcp
 | `claudio relay` | Run a relay server |
 | `claudio workspace create` | Create a workspace, where the relay lives |
 | `claudio workspace list` | Show members and their fingerprints |
+| `claudio workspace revoke` | End a membership, where the relay lives |
+| `claudio workspace trust` | Change the level the workspace proposes for a member |
 | `claudio invite` | Create an invitation code |
 | `claudio join` | Redeem an invitation |
 | `claudio expose` | Share a local session with the workspace |
 | `claudio unexpose` | Stop sharing one |
 | `claudio sessions` | List sessions reachable in a workspace |
 | `claudio trust` | Set the trust level for a person, workspace, or session |
+| `claudio pending` | List messages the `hold` gate is withholding |
+| `claudio approve` | Deliver one of them |
+| `claudio drop` | Discard one of them |
 | `claudio policy` | Set promotion mode and the cap on native peers |
 | `claudio status` | Show what this machine is running and why |
 | `claudio doctor` | Report what this machine can and cannot do |

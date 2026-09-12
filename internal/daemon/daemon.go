@@ -142,6 +142,10 @@ type Options struct {
 	// command can report what is running even when the connector is not.
 	StatusPath string
 
+	// HeldPath is where messages the hold gate withheld are kept, so a message
+	// nobody has seen survives the connector restarting.
+	HeldPath string
+
 	// ControlAddressPath is where the connector publishes the path of its
 	// control endpoint, so the MCP server and the command line can find it.
 	ControlAddressPath string
@@ -163,6 +167,7 @@ type Daemon struct {
 	registry *ccpeer.Registry
 	client   *ccpeer.Client
 	index    *orphanIndex
+	held     *heldStore
 	log      *slog.Logger
 
 	mu        sync.Mutex
@@ -171,6 +176,10 @@ type Daemon struct {
 	exposedTo map[string]string    // exposed session id to local session name
 	lastUsed  map[string]time.Time // remote session id to last traffic
 	degraded  string
+
+	// sup is the running supervisor, so a control call can deliver a message
+	// that was waiting for approval. It is nil until Run starts one.
+	sup *supervisor
 
 	// replyTo maps every way somebody might name a recent sender to an address
 	// the transport accepts. It is what makes a conversation go both ways when
@@ -224,6 +233,10 @@ func New(opts Options) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
+	held, heldErr := newHeldStore(opts.HeldPath)
+	if held == nil {
+		return nil, heldErr
+	}
 
 	d := &Daemon{
 		opts:      opts,
@@ -231,11 +244,16 @@ func New(opts Options) (*Daemon, error) {
 		registry:  registry,
 		client:    ccpeer.NewClient(opts.Platform, registry, opts.Logger),
 		index:     index,
+		held:      held,
 		log:       opts.Logger,
 		peers:     map[string]string{},
 		exposedTo: map[string]string{},
 		lastUsed:  map[string]time.Time{},
 		replyTo:   map[string]string{},
+	}
+
+	if heldErr != nil {
+		d.log.Warn("could not read the messages held for approval", "error", heldErr)
 	}
 
 	if !opts.Platform.Verified() {
@@ -261,6 +279,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	sup := newSupervisor(ctx, d.opts.Executable, d.opts.GhostArgs,
 		d.primarySessionsDir(), d.platform, d.index, d.log)
+
+	d.mu.Lock()
+	d.sup = sup
+	d.mu.Unlock()
 
 	var wg sync.WaitGroup
 
@@ -686,7 +708,7 @@ func matchesMention(s RemoteSession, mention string) bool {
 // local Claude Code session they are addressed to.
 func (d *Daemon) routeInbound(ctx context.Context, sup *supervisor) {
 	for msg := range d.opts.Transport.Deliveries() {
-		if err := d.deliver(ctx, sup, msg); err != nil {
+		if err := d.deliver(ctx, sup, msg, false); err != nil {
 			d.log.Error("could not deliver an incoming message",
 				"from", msg.From.ID, "to", msg.ToSession, "msg_id", msg.MsgID, "error", err)
 			continue
@@ -697,7 +719,11 @@ func (d *Daemon) routeInbound(ctx context.Context, sup *supervisor) {
 	}
 }
 
-func (d *Daemon) deliver(ctx context.Context, sup *supervisor, msg Delivery) error {
+// deliver puts one message into a local session's inbox.
+//
+// approved says the person has already decided about this one, which is what an
+// approval is, so the hold gate does not apply to it a second time.
+func (d *Daemon) deliver(ctx context.Context, sup *supervisor, msg Delivery, approved bool) error {
 	// A message is addressed to the identifier this machine published, so it is
 	// translated back to the session name before anything is looked up.
 	d.mu.Lock()
@@ -733,6 +759,20 @@ func (d *Daemon) deliver(ctx context.Context, sup *supervisor, msg Delivery) err
 	d.rememberSender(msg)
 
 	level := d.opts.Trust.For(msg.ProposedTrust, msg.From.Person, target.Name)
+	if level == trust.Hold && approved {
+		// Approved, so the gate is spent. The framing falls back to the default,
+		// because hold says nothing about how to read a message, only about when.
+		level = trust.Default
+	}
+	if level == trust.Hold {
+		id, err := d.held.Add(msg)
+		if err != nil {
+			return err
+		}
+		d.log.Info("a message is waiting for approval",
+			"id", id, "from", msg.From.Person, "session", target.Name, "msg_id", msg.MsgID)
+		return nil
+	}
 	framed, err := trust.Frame(level, trust.Sender{
 		Person:    msg.From.Person,
 		Session:   msg.From.Session,
@@ -788,6 +828,36 @@ func cmpOr(v, fallback string) string {
 // exist would be a failure the person who sent it can neither see nor do
 // anything about, and being sure costs one directory listing on a path that has
 // already gone wrong.
+// approveByID delivers a message that was waiting, at whatever level applies now.
+//
+// The level is resolved again rather than remembered. Holding a message means
+// the person had not decided, and by the time they approve it they have, so the
+// framing reflects the decision rather than the uncertainty.
+func (d *Daemon) approveByID(ctx context.Context, id string) error {
+	d.mu.Lock()
+	sup := d.sup
+	d.mu.Unlock()
+	if sup == nil {
+		return errors.New("daemon: the connector is not running yet")
+	}
+
+	item, err := d.held.Take(id)
+	if err != nil {
+		return err
+	}
+	if err := d.deliver(ctx, sup, item.Delivery, true); err != nil {
+		// Put it back rather than lose it. A delivery that failed is not a
+		// decision the person can be asked to make again from nothing.
+		if _, addErr := d.held.Add(item.Delivery); addErr != nil {
+			d.log.Error("a held message was lost after a failed delivery",
+				"id", id, "error", addErr)
+		}
+		return err
+	}
+	d.log.Info("a held message was approved and delivered", "id", id)
+	return nil
+}
+
 func (d *Daemon) localSession(name string) (ccpeer.Record, error) {
 	rec, err := d.lookupLocal(name)
 	if err == nil {

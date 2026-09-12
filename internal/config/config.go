@@ -24,6 +24,7 @@ const (
 	FileIdentity  = "identity.json"
 	FileGhosts    = "ghosts.json"
 	FileStatus    = "status.json"
+	FileHeld      = "held.json"
 	FileWorkspace = "workspace.json"
 )
 

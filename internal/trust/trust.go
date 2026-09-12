@@ -28,14 +28,20 @@ const (
 	Peer = "peer"
 )
 
-// Hold is a gate rather than a level. It withholds delivery until the person
-// approves, mirroring what Claude Code already offers for its own peers.
+// Hold withholds delivery until the person approves, mirroring what Claude Code
+// already offers for its own peers.
+//
+// It is written where a level is written and resolves like one, as the most
+// restrictive value there is, so a hold anywhere holds. What makes it a gate
+// rather than a level is what happens next: nothing is framed and nothing is
+// delivered until somebody says so. See ADR-0006.
 const Hold = "hold"
 
 // Default is what applies when nothing else says otherwise.
 const Default = Collaborator
 
 var order = map[string]int{
+	Hold:         -1,
 	Source:       0,
 	Collaborator: 1,
 	Peer:         2,
@@ -51,8 +57,8 @@ func Valid(level string) bool {
 func Parse(level string) (string, error) {
 	l := strings.ToLower(strings.TrimSpace(level))
 	if _, ok := order[l]; !ok {
-		return "", fmt.Errorf("trust: %q is not a level, use %s, %s, or %s",
-			level, Source, Collaborator, Peer)
+		return "", fmt.Errorf("trust: %q is not a level, use %s, %s, %s, or %s",
+			level, Hold, Source, Collaborator, Peer)
 	}
 	return l, nil
 }
@@ -78,8 +84,10 @@ func Resolve(levels ...string) string {
 		}
 		rank, ok := order[l]
 		if !ok {
-			// An unknown level is treated as the most restrictive one. A typo in
-			// a configuration file must never widen access.
+			// An unknown level falls back to source rather than to hold. A typo
+			// must never widen access, and it must not silently stop delivery
+			// either: a message nobody receives and nobody was asked about is
+			// indistinguishable from the tool being broken.
 			return Source
 		}
 		seen = true

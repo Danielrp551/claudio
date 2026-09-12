@@ -31,7 +31,12 @@ Three levels:
 | `collaborator` | Arrives natively, marked unambiguously as another person, framed as a request to evaluate rather than an instruction. **The default** | Collaborators, clients, open source |
 | `source` | Arrives as data, with an explicit instruction not to follow embedded instructions | Untrusted sources, bots, automation |
 
-Plus one gate that is not a level, `hold`, which withholds delivery until the user approves.
+Plus one gate that is not a level, `hold`, which withholds delivery until the user approves. It is
+written where a level is written and resolves like the most restrictive value there is, so a hold
+anywhere holds. What makes it a gate rather than a level is what happens next: the message is kept,
+`claudio pending` lists what is waiting, and `claudio approve` or `claudio drop` decides. A message
+that is held is stored unframed and framed at delivery, with the level that applies then, because the
+point of holding is that the person had not decided yet.
 
 What changes between levels is **the framing applied to the text as it enters the inbox**, which is
 the only thing that actually governs how the receiving model treats it. Session permissions apply

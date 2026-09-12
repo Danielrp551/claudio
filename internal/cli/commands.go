@@ -71,11 +71,16 @@ func runDaemon(ctx context.Context, env Env, args []string) error {
 	if err != nil {
 		return err
 	}
+	heldPath, err := config.Path(config.FileHeld)
+	if err != nil {
+		return err
+	}
 
 	d, err := daemon.New(daemon.Options{
 		SessionsDirs:       cfg.SessionsDirs,
 		StatePath:          ghosts,
 		StatusPath:         status,
+		HeldPath:           heldPath,
 		ControlAddressPath: controlAddr,
 		Workspace:          cfg.Workspace,
 		MachineID:          cfg.MachineID,
@@ -162,7 +167,7 @@ func runRelay(ctx context.Context, env Env, args []string) error {
 // lives.
 func runWorkspace(_ context.Context, env Env, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: claudio workspace create <slug> [--name <name>]")
+		return errors.New("usage: claudio workspace <create|list|revoke|trust>")
 	}
 
 	switch args[0] {
@@ -234,8 +239,15 @@ func runWorkspace(_ context.Context, env Env, args []string) error {
 		}
 		return nil
 
+	case "revoke":
+		return runWorkspaceRevoke(context.Background(), env, args[1:])
+
+	case "trust":
+		return runWorkspaceTrust(context.Background(), env, args[1:])
+
 	default:
-		return fmt.Errorf("unknown workspace command %q, use create or list", args[0])
+		return fmt.Errorf(
+			"unknown workspace command %q, use create, list, revoke, or trust", args[0])
 	}
 }
 
