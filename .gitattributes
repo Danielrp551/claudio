@@ -1,0 +1,19 @@
+# Every text file in this repository is stored and checked out with LF endings.
+#
+# This is not a style preference. The golden test data under internal/ccpeer is
+# compared byte for byte against frames captured from a live session, so a
+# checkout that rewrote its line endings would fail the test on Windows and pass
+# everywhere else, which is the worst kind of failure.
+* text=auto eol=lf
+
+*.go        text eol=lf diff=golang
+*.md        text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+Makefile    text eol=lf
+
+*.png       binary
+*.jpg       binary
+*.gif       binary
+*.ico       binary

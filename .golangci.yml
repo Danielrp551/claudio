@@ -1,0 +1,48 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - unconvert
+    - unparam
+    - wrapcheck
+
+linters-settings:
+  errorlint:
+    errorf: true
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+  wrapcheck:
+    ignoreSigs:
+      - .Errorf(
+      - errors.New(
+      - errors.Join(
+      - .Wrap(
+
+issues:
+  exclude-rules:
+    # Test files may be looser about error wrapping and security linting.
+    - path: _test.go
+      linters:
+        - wrapcheck
+        - gosec
+  max-issues-per-linter: 0
+  max-same-issues: 0

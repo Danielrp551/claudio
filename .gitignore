@@ -1,0 +1,23 @@
+# Binaries
+/bin/
+/dist/
+claudio
+claudio.exe
+
+# Go
+/vendor/
+*.test
+*.out
+coverage.txt
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local state produced while running the tool
+*.local.json
