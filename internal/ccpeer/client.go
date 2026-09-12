@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/Danielrp551/claudio/internal/safetext"
 )
 
 // DefaultDeliverTimeout bounds one delivery. Claude Code closes a connection
@@ -152,6 +154,29 @@ func NewFrame(o FrameOptions) (Frame, error) {
 	if o.Priority == "" {
 		o.Priority = PriorityNext
 	}
+
+	// The reply address is built by this machine, from a path this machine
+	// chose, so anything wrong with it is a bug here rather than an attack. It
+	// is still checked, because it is about to be written into an attribute and
+	// a newline in it would split the element in two.
+	if err := safetext.CheckField("reply address", o.FromAddress); err != nil {
+		return Frame{}, fmt.Errorf("ccpeer: %w", err)
+	}
+
+	// The sender name is a different matter. It carries the name of a person on
+	// another machine, so it is cleaned rather than trusted.
+	o.FromName = safetext.Field(o.FromName)
+	o.FromMode = safetext.Field(o.FromMode)
+	if o.FromName == "" {
+		return Frame{}, errors.New("ccpeer: the sender name is empty once cleaned")
+	}
+
+	// The body is neutralised here as well as in the trust framing. The two
+	// layers do not know about each other, and the operation is idempotent, so
+	// running it twice costs nothing and forgetting it once would cost a lot.
+	// This is the layer that matters for text that never passed through the
+	// trust package, which includes everything at the peer level.
+	o.Text = safetext.Body(o.Text)
 
 	// The attribute values are quoted by hand rather than with %q on purpose.
 	// A Windows inbox path is full of backslashes, and %q would escape every one

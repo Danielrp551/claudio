@@ -23,6 +23,7 @@ import (
 	"github.com/Danielrp551/claudio/internal/daemon"
 	"github.com/Danielrp551/claudio/internal/identity"
 	"github.com/Danielrp551/claudio/internal/relay"
+	"github.com/Danielrp551/claudio/internal/safetext"
 	"github.com/Danielrp551/claudio/internal/workspace"
 )
 
@@ -414,13 +415,24 @@ func (c *RelayClient) readLoop(ctx context.Context, conn *websocket.Conn) error 
 	}
 }
 
+// applyRoster records who is reachable.
+//
+// Every name in here was chosen by somebody else and travelled through a server
+// this machine does not control, and every one of them ends up inside a sentence
+// the user's own session reads. The relay refuses the worst of them at the door,
+// and this is the layer that does not have to trust that it did: a name from an
+// older relay, or from one somebody else runs, is cleaned before it is stored.
 func (c *RelayClient) applyRoster(msg relay.Message) {
 	members := make(map[string]relay.RosterMember, len(msg.Members))
 	for _, m := range msg.Members {
+		m.Person = safetext.Field(m.Person)
 		members[m.ID] = m
 	}
 	sessions := make(map[string]relay.RosterSession, len(msg.Peers))
 	for _, s := range msg.Peers {
+		s.Person = safetext.Field(s.Person)
+		s.Name = safetext.Field(s.Name)
+		s.Machine = safetext.Field(s.Machine)
 		sessions[s.ID] = s
 	}
 
@@ -459,10 +471,14 @@ func (c *RelayClient) applyEnvelope(msg relay.Message) {
 		return
 	}
 
+	// The session name and the mode travel inside the sealed envelope, so the
+	// relay never touched them, which is exactly why they need cleaning here:
+	// they are whatever the sender chose to put there, and they are about to be
+	// rendered inside the framing the user's own session reads.
 	from := daemon.RemoteSession{
 		ID:      msg.FromSession,
 		Person:  sender.Person,
-		Session: payload.FromSession,
+		Session: safetext.Field(payload.FromSession),
 		Status:  "idle",
 	}
 	c.mu.RLock()
@@ -477,7 +493,7 @@ func (c *RelayClient) applyEnvelope(msg relay.Message) {
 		From:          from,
 		ToSession:     payload.ToSession,
 		Text:          payload.Text,
-		FromMode:      payload.FromMode,
+		FromMode:      safetext.Field(payload.FromMode),
 		MsgID:         payload.MsgID,
 		ProposedTrust: sender.Trust,
 		Workspace:     c.opts.Workspace,

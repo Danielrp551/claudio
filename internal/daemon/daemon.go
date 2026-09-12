@@ -609,12 +609,15 @@ func (d *Daemon) deliver(ctx context.Context, sup *supervisor, msg Delivery) err
 	// the only thing that actually governs how the receiving model treats it.
 	// Permissions are untouched at every level.
 	level := d.opts.Trust.For(msg.ProposedTrust, msg.From.Person, target.Name)
-	framed := trust.Frame(level, trust.Sender{
+	framed, err := trust.Frame(level, trust.Sender{
 		Person:    msg.From.Person,
 		Session:   msg.From.Session,
 		Workspace: cmpOr(msg.Workspace, d.opts.Workspace),
 		Mode:      msg.FromMode,
 	}, msg.Text)
+	if err != nil {
+		return err
+	}
 
 	frame, err := ccpeer.NewFrame(ccpeer.FrameOptions{
 		Text:        framed,

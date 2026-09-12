@@ -313,9 +313,12 @@ func TestTrustPeerPassesTheTextThrough(t *testing.T) {
 	t.Parallel()
 
 	const text = "rebasar sobre main ya es seguro"
-	framed := trust.Frame(trust.Peer, trust.Sender{
+	framed, err := trust.Frame(trust.Peer, trust.Sender{
 		Person: "alice", Session: "alice-cc", Workspace: "acme", Mode: "prompting",
 	}, text)
+	if err != nil {
+		t.Fatalf("Frame: %v", err)
+	}
 
 	if framed != text {
 		t.Errorf("at peer the text should be passed through, got:\n%s", framed)

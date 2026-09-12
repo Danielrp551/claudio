@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Danielrp551/claudio/internal/identity"
+	"github.com/Danielrp551/claudio/internal/safetext"
 )
 
 var (
@@ -106,6 +107,21 @@ func (s *Store) CreateWorkspace(slug, name, ownerPerson string, ownerIdentity id
 	slug = strings.ToLower(strings.TrimSpace(slug))
 	if slug == "" {
 		return nil, nil, errors.New("workspace: a slug is required")
+	}
+	// The slug and both names end up inside sentences that other people read,
+	// and the owner name ends up in the trust framing of every message this
+	// member sends. They are refused here rather than cleaned, so what the store
+	// holds is what the person who chose it believes it to be.
+	if err := safetext.CheckField("workspace slug", slug); err != nil {
+		return nil, nil, err
+	}
+	if err := safetext.CheckField("owner name", ownerPerson); err != nil {
+		return nil, nil, err
+	}
+	if name != "" {
+		if err := safetext.CheckField("workspace name", name); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	s.mu.Lock()
@@ -217,6 +233,13 @@ func (s *Store) CreateInvitation(workspaceID, createdBy string, ttl time.Duratio
 func (s *Store) Redeem(code, person string, who identity.Public) (*Member, *Workspace, error) {
 	if !who.Valid() {
 		return nil, nil, errors.New("workspace: the joining identity is not usable")
+	}
+	// The name a member chooses here is rendered inside the trust framing of
+	// every message they ever send, on every machine that receives one. A
+	// newline in it is enough to write a sentence of the framing yourself, so it
+	// is refused at the door.
+	if err := safetext.CheckField("person name", person); err != nil {
+		return nil, nil, err
 	}
 	want := hashCode(code)
 

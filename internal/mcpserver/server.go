@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/Danielrp551/claudio/internal/daemon"
+	"github.com/Danielrp551/claudio/internal/safetext"
 )
 
 // defaultProtocolVersion is used when a client does not name one.
@@ -170,8 +171,16 @@ func (s *Server) callTool(ctx context.Context, name string, raw json.RawMessage)
 		if err := json.Unmarshal(raw, &args); err != nil {
 			return "", errors.New("the arguments could not be read")
 		}
-		if args.To == "" || args.Text == "" {
-			return "", errors.New("a send needs both to and text")
+		if args.To == "" || strings.TrimSpace(args.Text) == "" {
+			return "", errors.New("a send needs both a recipient and something to say")
+		}
+		// Checked here so a mistake is reported to whoever made it. The defence
+		// that actually holds is on the receiving machine, which cleans these
+		// fields no matter which client sent them.
+		if args.FromSession != "" {
+			if err := safetext.CheckField("session name", args.FromSession); err != nil {
+				return "", err
+			}
 		}
 		resp, err := s.control.Call(ctx, daemon.ControlRequest{
 			Op:          daemon.ControlSend,
