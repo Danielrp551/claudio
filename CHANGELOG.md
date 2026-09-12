@@ -21,6 +21,21 @@ All notable changes to this project are recorded here. The format follows
 - Ten architecture decision records, and `docs/protocol.md`, the verified description of the Claude
   Code messaging protocol on Windows and Linux.
 
+### Fixed
+
+- The main package was missing from the repository. An unanchored `claudio` line in `.gitignore`
+  also matched the `cmd/claudio` directory, so the published tree did not build. The binary patterns
+  are anchored to the repository root now.
+- Socket addresses that macOS cannot bind. A Unix socket path has to fit in `sun_path`, which is four
+  bytes shorter on macOS than on Linux and starts 46 bytes into a per user temporary directory. The
+  length is checked before binding, with a short fallback under `/tmp` when the preferred directory
+  does not leave room.
+- A message for a session that started since the last poll was refused instead of delivered. The
+  connector now looks again before it says a session does not exist.
+- The socket directory is verified to be a directory this user owns, rather than created and trusted.
+  A symbolic link planted in a shared temporary directory would otherwise have received the
+  permissions tightening meant for our own directory.
+
 ### Notes
 
 Version one is messaging between sessions. Channels and threads are version two, and shared context
