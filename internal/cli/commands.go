@@ -29,7 +29,7 @@ import (
 func runDaemon(ctx context.Context, env Env, args []string) error {
 	fs := flagSet("daemon", env.Stderr)
 	level := fs.String("log-level", "", "debug, info, warn, or error")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 
@@ -105,7 +105,7 @@ func runRelay(ctx context.Context, env Env, args []string) error {
 	addr := fs.String("addr", ":8787", "address to listen on")
 	storePath := fs.String("store", "", "where to keep the workspace, defaults to the configuration directory")
 	level := fs.String("log-level", "info", "debug, info, warn, or error")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 
@@ -162,7 +162,7 @@ func runWorkspace(_ context.Context, env Env, args []string) error {
 		fs := flagSet("workspace create", env.Stderr)
 		name := fs.String("name", "", "a readable name, defaults to the slug")
 		storePath := fs.String("store", "", "where to keep the workspace")
-		if err := fs.Parse(args[1:]); err != nil {
+		if err := parse(fs, args[1:]); err != nil {
 			return err
 		}
 		if fs.NArg() != 1 {
@@ -202,7 +202,7 @@ func runWorkspace(_ context.Context, env Env, args []string) error {
 	case "list":
 		fs := flagSet("workspace list", env.Stderr)
 		storePath := fs.String("store", "", "where the workspace is kept")
-		if err := fs.Parse(args[1:]); err != nil {
+		if err := parse(fs, args[1:]); err != nil {
 			return err
 		}
 		path, err := storeOrDefault(*storePath)
@@ -238,7 +238,7 @@ func runInvite(_ context.Context, env Env, args []string) error {
 	storePath := fs.String("store", "", "where the workspace is kept")
 	ttl := fs.Duration("expires-in", 24*time.Hour, "how long the code stays usable")
 	uses := fs.Int("uses", 1, "how many times it can be redeemed, zero for no limit")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 	if *slug == "" {
@@ -274,7 +274,7 @@ func runJoin(ctx context.Context, env Env, args []string) error {
 	relayURL := fs.String("relay", "", "the relay endpoint, for example wss://relay.example.com/connect")
 	slug := fs.String("workspace", "", "the workspace to join")
 	person := fs.String("as", "", "the name other members see, defaults to your user name")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -418,7 +418,7 @@ func runTrust(_ context.Context, env Env, args []string) error {
 	fs := flagSet("trust", env.Stderr)
 	forWorkspace := fs.Bool("workspace", false, "apply to everybody in the workspace")
 	forSession := fs.String("session", "", "apply to one local session only")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 
@@ -491,7 +491,7 @@ func runPolicy(_ context.Context, env Env, args []string) error {
 	fs := flagSet("policy", env.Stderr)
 	mode := fs.String("mode", "", "auto, manual, or off")
 	maxGhosts := fs.Int("max-ghosts", 0, "how many remote sessions get a native peer")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 

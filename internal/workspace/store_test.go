@@ -49,6 +49,33 @@ func TestCreateWorkspace(t *testing.T) {
 	}
 }
 
+// TestOwningAWorkspaceGrantsNoExtraTrust is a regression test.
+//
+// An earlier version gave the owner the highest trust level. Because a member's
+// level is proposed to every other machine, that quietly granted the owner
+// maximum trust on everybody's computer, which is the one thing ADR-0006 says
+// must not be possible. Owning a workspace is administration, not trust.
+func TestOwningAWorkspaceGrantsNoExtraTrust(t *testing.T) {
+	t.Parallel()
+
+	s := newStore(t)
+	w, owner, err := s.CreateWorkspace("acme", "Acme", "daniel", newIdentity(t))
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	if owner.Trust != w.DefaultTrust {
+		t.Errorf("the owner is proposed at %q while everybody else gets %q",
+			owner.Trust, w.DefaultTrust)
+	}
+	if owner.Trust == "peer" {
+		t.Error("the owner is proposed at the highest level, which grants it on every member's machine")
+	}
+	if owner.Role != RoleOwner {
+		t.Errorf("the owner lost its role, got %q", owner.Role)
+	}
+}
+
 // TestInvitationIsAVoucherNotACredential covers the property the security model
 // rests on. Two people redeeming the same code get two separate memberships with
 // separate keys, so revoking one leaves the other alone.

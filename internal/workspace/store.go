@@ -131,9 +131,16 @@ func (s *Store) CreateWorkspace(slug, name, ownerPerson string, ownerIdentity id
 		Person:      ownerPerson,
 		Identity:    ownerIdentity,
 		Role:        RoleOwner,
-		Trust:       "peer",
-		Status:      StatusActive,
-		JoinedAt:    now,
+
+		// The owner is proposed at the same level as everybody else. Owning a
+		// workspace is about administering it, not about how much anybody's
+		// Claude should trust the owner's messages. Giving the owner the highest
+		// level here would grant it on every member's machine automatically,
+		// which is exactly what ADR-0006 says must not happen.
+		Trust: w.DefaultTrust,
+
+		Status:   StatusActive,
+		JoinedAt: now,
 	}
 	w.OwnerID = owner.ID
 

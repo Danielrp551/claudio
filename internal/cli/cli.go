@@ -139,3 +139,55 @@ func flagSet(name string, out io.Writer) *flag.FlagSet {
 	fs.SetOutput(out)
 	return fs
 }
+
+// parse accepts flags before or after the positional arguments.
+//
+// The standard library stops parsing at the first argument that is not a flag,
+// so "workspace create acme --name Acme" would treat the name as another
+// positional and fail. People write it that way constantly, and a tool that
+// answers such a line with a usage error is a tool that feels broken. This
+// reorders the arguments first, which is what most command line tools do.
+func parse(fs *flag.FlagSet, args []string) error {
+	var flags, positional []string
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+
+		if a == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			positional = append(positional, a)
+			continue
+		}
+
+		flags = append(flags, a)
+
+		// A flag written as --name=value carries its own value, and a boolean
+		// flag never takes one. Anything else consumes the argument after it.
+		name := strings.TrimLeft(a, "-")
+		if strings.Contains(name, "=") {
+			continue
+		}
+		if isBoolFlag(fs, name) {
+			continue
+		}
+		if i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+
+	return fs.Parse(append(flags, positional...))
+}
+
+// isBoolFlag reports whether a flag takes no value.
+func isBoolFlag(fs *flag.FlagSet, name string) bool {
+	f := fs.Lookup(name)
+	if f == nil {
+		return false
+	}
+	bf, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return ok && bf.IsBoolFlag()
+}

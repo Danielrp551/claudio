@@ -171,6 +171,15 @@ func New(opts Options) (*Daemon, error) {
 	}
 	opts.Policy = opts.Policy.withDefaults()
 
+	// Without an opinion of its own, a machine would let whatever the workspace
+	// proposes stand, and a workspace proposing the highest level would then get
+	// it everywhere. Starting from collaborator means raising the level takes
+	// both sides, which is the rule in ADR-0006, and it holds whether or not the
+	// command line remembered to set it.
+	if opts.Trust.Workspace == "" {
+		opts.Trust.Workspace = trust.Collaborator
+	}
+
 	registry, err := ccpeer.NewRegistry(opts.Platform, opts.SessionsDirs...)
 	if err != nil {
 		return nil, err

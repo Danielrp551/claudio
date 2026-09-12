@@ -19,7 +19,7 @@ func runGhost(ctx context.Context, env Env, args []string) error {
 	heartbeat := fs.Duration("heartbeat", ghost.DefaultHeartbeat,
 		"how often to refresh the published record")
 
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 

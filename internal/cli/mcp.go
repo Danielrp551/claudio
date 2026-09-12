@@ -18,7 +18,7 @@ import (
 func runMCP(ctx context.Context, env Env, args []string) error {
 	fs := flagSet("mcp", env.Stderr)
 	level := fs.String("log-level", "warn", "debug, info, warn, or error")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 
