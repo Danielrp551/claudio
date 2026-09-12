@@ -241,7 +241,17 @@ func (m *machine) awaitMessage(within time.Duration) ccpeer.Envelope {
 //
 // The only thing this shares with a real deployment is the computer it runs on.
 func TestTwoPeopleTwoConnectorsOneMessage(t *testing.T) {
-	store, err := workspace.OpenStore(filepath.Join(t.TempDir(), "workspace.json"))
+	// Not t.TempDir. A relay handler can still be finishing its own shutdown,
+	// and writing the store one last time, while the test framework is removing
+	// the directory, which fails the test for a reason that has nothing to do
+	// with what it is checking.
+	dir, err := os.MkdirTemp("", "claudio-e2e-relay-")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	store, err := workspace.OpenStore(filepath.Join(dir, "workspace.json"))
 	if err != nil {
 		t.Fatalf("OpenStore: %v", err)
 	}
