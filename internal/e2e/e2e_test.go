@@ -139,7 +139,7 @@ func newMachine(t *testing.T, person, sessionName, relayURL string, id *identity
 		Executable:   claudioBinary,
 		Workspace:    "acme",
 		MachineID:    person + "-machine",
-		Policy:       daemon.Policy{Mode: daemon.ModeAuto, MaxGhosts: 4},
+		Policy:       daemon.Policy{Mode: daemon.ModeAuto}.SetCap(4),
 		Transport:    m.client,
 		Exposes:      func(name string) bool { return name == sessionName },
 		Logger:       quiet(),

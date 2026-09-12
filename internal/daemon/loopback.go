@@ -24,6 +24,10 @@ type Loopback struct {
 	// only cares about the outbound half.
 	Answer func(Outbound) string
 
+	// Unreachable makes this transport report that it has never connected, which
+	// is the state a connector is in when the relay refuses its identity.
+	Unreachable bool
+
 	deliveries chan Delivery
 
 	exposedMu sync.Mutex
@@ -113,6 +117,20 @@ func (l *Loopback) Roster() []RemoteSession {
 	out := make([]RemoteSession, len(l.roster))
 	copy(out, l.roster)
 	return out
+}
+
+// Health is always connected. A loopback has no network to lose, and saying so
+// keeps the tests honest about what they are and are not covering.
+func (l *Loopback) Health() TransportHealth {
+	if l.Unreachable {
+		return TransportHealth{Detail: "the relay refused this member"}
+	}
+	select {
+	case <-l.closed:
+		return TransportHealth{}
+	default:
+		return TransportHealth{Connected: true, EverConnected: true}
+	}
 }
 
 // Close stops the transport. It is safe to call more than once.

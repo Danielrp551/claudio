@@ -1,6 +1,9 @@
 package daemon
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // RemoteSession is a Claude Code session on somebody else's machine, as the
 // transport reports it.
@@ -58,6 +61,15 @@ type Delivery struct {
 	// Workspace is the slug the message came through, which the framing names so
 	// the reader knows where a stranger came from.
 	Workspace string `json:"workspace,omitempty"`
+
+	// ReplyTo is an address this transport accepts in Outbound.To.
+	//
+	// It exists because the framing invites the reader to reply and, without it,
+	// there was frequently nobody to reply to. A sender who exposes no session of
+	// their own is not in anybody's roster, so a reply had no destination and
+	// died in the connector with "could not work out who a message was for". A
+	// message that arrived is proof enough that its sender can be reached.
+	ReplyTo string `json:"replyTo,omitempty"`
 }
 
 // ExposedSession is a local Claude Code session this machine shares.
@@ -97,6 +109,29 @@ type Transport interface {
 	// after a reconnect without being asked again.
 	Expose(sessions []ExposedSession)
 
+	// Health describes whether this transport can currently carry anything.
+	//
+	// It exists because a connector that has lost its relay looks exactly like a
+	// connector whose workspace is quiet, and the difference matters to the
+	// person using it. Without this, status reported a healthy workspace with an
+	// empty roster while the relay had been down for an hour, and only the log
+	// said otherwise.
+	Health() TransportHealth
+
 	// Close stops the transport and closes the delivery channel.
 	Close() error
+}
+
+// TransportHealth is what a transport says about its own connection.
+type TransportHealth struct {
+	// Connected is whether the transport can carry a message right now.
+	Connected bool
+	// EverConnected is whether it has ever succeeded. The two differ in the case
+	// worth separating: a connector that has never been accepted is misconfigured
+	// or unwelcome, and one that was accepted and dropped is waiting.
+	EverConnected bool
+	// Since is when the current state began.
+	Since time.Time
+	// Detail is the last reason it could not connect, ready to show somebody.
+	Detail string
 }

@@ -278,7 +278,7 @@ func TestDaemonEvictsBeyondTheCap(t *testing.T) {
 		StatePath:    filepath.Join(t.TempDir(), "ghosts.json"),
 		Executable:   claudioBinary,
 		Workspace:    "acme",
-		Policy:       Policy{Mode: ModeAuto, MaxGhosts: 2},
+		Policy:       Policy{Mode: ModeAuto}.SetCap(2),
 		Transport:    NewLoopback(roster, nil),
 		Logger:       quietLogger(),
 		PollInterval: 100 * time.Millisecond,

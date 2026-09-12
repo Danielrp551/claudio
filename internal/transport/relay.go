@@ -75,6 +75,21 @@ type RelayClient struct {
 	workspaceID string
 	memberID    string
 
+	// health is what status reports. It is separate from conn because the
+	// question a person asks is not "is there a socket" but "can this thing
+	// carry my message, and if not, since when and why".
+	health daemon.TransportHealth
+
+	// lastKnown remembers where a session was, after it stops being reachable.
+	//
+	// It is what makes deferred delivery possible. The relay queues an envelope
+	// for a member who is offline, but that only ever happened by accident,
+	// because this client refused to address anybody who had left the roster, so
+	// nothing ever reached the queue. Remembering which member owned a session
+	// means a message to somebody who stepped away is handed over and waits for
+	// them, which is what the workspace promised.
+	lastKnown map[string]relay.RosterSession
+
 	ctx       context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
@@ -105,6 +120,7 @@ func Dial(ctx context.Context, opts Options) (*RelayClient, error) {
 		deliveries: make(chan daemon.Delivery, 64),
 		members:    map[string]relay.RosterMember{},
 		sessions:   map[string]relay.RosterSession{},
+		lastKnown:  map[string]relay.RosterSession{},
 		seq:        map[string]int64{},
 		ctx:        ctx,
 		cancel:     cancel,
@@ -167,18 +183,31 @@ func (c *RelayClient) Expose(sessions []daemon.ExposedSession) {
 // A nil error means the relay accepted the envelope. It does not mean anybody
 // read it, and the daemon records it accordingly. See ADR-0007.
 func (c *RelayClient) Send(ctx context.Context, msg daemon.Outbound) error {
-	c.mu.RLock()
-	session, known := c.sessions[msg.To]
+	// The whole read, change and write of the sequence number happens under one
+	// hold of the write lock. It used to be read under RLock, which lets readers
+	// in simultaneously, and written back after the message had been sealed and
+	// sent, so two sends to the same destination took the same number and the
+	// counter advanced once for both. Nothing reads Seq yet, which is why it went
+	// unnoticed, and a counter that is wrong before anybody depends on it is a
+	// trap rather than a bug.
+	c.mu.Lock()
+	session, reachable := c.sessions[msg.To]
+	if !reachable {
+		// Not reachable now does not mean unknown. A member who was here a
+		// moment ago is somebody the relay can still hold a message for.
+		session, reachable = c.lastKnown[msg.To]
+	}
 	var recipient relay.RosterMember
-	if known {
+	if reachable {
 		recipient = c.members[session.MemberID]
 	}
 	conn := c.conn
 	seq := c.seq[msg.To] + 1
-	c.mu.RUnlock()
+	c.seq[msg.To] = seq
+	c.mu.Unlock()
 
-	if !known {
-		return fmt.Errorf("transport: %q is not a session this workspace reaches", msg.To)
+	if !reachable {
+		return fmt.Errorf("transport: %q is not a session this workspace knows", msg.To)
 	}
 	if !recipient.Identity.Valid() {
 		return fmt.Errorf("transport: the owner of %q has no usable identity", msg.To)
@@ -219,11 +248,14 @@ func (c *RelayClient) Send(ctx context.Context, msg daemon.Outbound) error {
 		return fmt.Errorf("transport: sending an envelope: %w", err)
 	}
 
-	c.mu.Lock()
-	c.seq[msg.To] = seq
-	c.mu.Unlock()
-
 	return nil
+}
+
+// Health reports whether the relay can be reached right now.
+func (c *RelayClient) Health() daemon.TransportHealth {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.health
 }
 
 // Close stops the client and closes the delivery channel.
@@ -256,9 +288,24 @@ func (c *RelayClient) keepConnected() {
 
 		// A dropped connection means nothing is reachable, and saying so is
 		// better than leaving a stale roster that promises peers who are gone.
+		// What the roster loses, lastKnown keeps, so a message to somebody who
+		// stepped away can still be addressed and queued for them.
 		c.mu.Lock()
 		c.conn = nil
+		for id, sess := range c.sessions {
+			c.lastKnown[id] = sess
+		}
 		c.sessions = map[string]relay.RosterSession{}
+		detail := ""
+		if err != nil {
+			detail = err.Error()
+		}
+		c.health = daemon.TransportHealth{
+			Connected:     false,
+			EverConnected: c.health.EverConnected,
+			Since:         time.Now(),
+			Detail:        detail,
+		}
 		c.mu.Unlock()
 
 		select {
@@ -291,6 +338,12 @@ func (c *RelayClient) runOnce(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.conn = conn
+	c.mu.Unlock()
+
+	c.mu.Lock()
+	c.health = daemon.TransportHealth{
+		Connected: true, EverConnected: true, Since: time.Now(),
+	}
 	c.mu.Unlock()
 
 	c.log.Info("connected to the relay", "url", c.opts.URL, "workspace", c.opts.Workspace)
@@ -489,8 +542,23 @@ func (c *RelayClient) applyEnvelope(msg relay.Message) {
 	}
 	c.mu.RUnlock()
 
+	// Anybody who sent a message can be sent one back, whether or not they
+	// expose a session. The address is registered the same way a roster entry
+	// is, so Send resolves it without a special case, and it outlives the
+	// connection because the relay will hold a message for a member who left.
+	replyTo := "member:" + sender.ID
+	c.mu.Lock()
+	c.lastKnown[replyTo] = relay.RosterSession{
+		ID:       replyTo,
+		MemberID: sender.ID,
+		Person:   sender.Person,
+		Name:     from.Session,
+	}
+	c.mu.Unlock()
+
 	delivery := daemon.Delivery{
 		From:          from,
+		ReplyTo:       replyTo,
 		ToSession:     payload.ToSession,
 		Text:          payload.Text,
 		FromMode:      safetext.Field(payload.FromMode),

@@ -84,6 +84,13 @@ func runDaemon(ctx context.Context, env Env, args []string) error {
 		Transport:          client,
 		Exposes:            cfg.Exposes,
 		Logger:             log,
+		Reload: func() (daemon.TrustSettings, daemon.Policy, error) {
+			fresh, err := config.Load()
+			if err != nil {
+				return daemon.TrustSettings{}, daemon.Policy{}, err
+			}
+			return fresh.Trust, fresh.Policy, nil
+		},
 	})
 	if err != nil {
 		return err
@@ -357,6 +364,14 @@ func joinURL(relayURL string) string {
 
 // runExpose chooses which local sessions this machine shares.
 func runExpose(_ context.Context, env Env, args []string) error {
+	// Parsed rather than taken literally. Without this, "claudio expose --help"
+	// registered a session named --help in the configuration and shared it.
+	fs := flagSet("expose", env.Stderr)
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	args = fs.Args()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -388,6 +403,12 @@ func runExpose(_ context.Context, env Env, args []string) error {
 
 // runUnexpose stops sharing a session.
 func runUnexpose(_ context.Context, env Env, args []string) error {
+	fs := flagSet("unexpose", env.Stderr)
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	args = fs.Args()
+
 	if len(args) == 0 {
 		return errors.New("usage: claudio unexpose <session>")
 	}
@@ -491,7 +512,10 @@ func printTrust(env Env, cfg config.Config) {
 func runPolicy(_ context.Context, env Env, args []string) error {
 	fs := flagSet("policy", env.Stderr)
 	mode := fs.String("mode", "", "auto, manual, or off")
-	maxGhosts := fs.Int("max-ghosts", 0, "how many remote sessions get a native peer")
+	// The default is negative rather than zero so that asking for zero can be
+	// told apart from not asking. Zero is a real answer: it means run no extra
+	// processes and reach everybody through the MCP tools.
+	maxGhosts := fs.Int("max-ghosts", -1, "how many remote sessions get a native peer, zero for none")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -509,23 +533,67 @@ func runPolicy(_ context.Context, env Env, args []string) error {
 			return fmt.Errorf("%q is not a mode, use auto, manual, or off", *mode)
 		}
 	}
-	if *maxGhosts > 0 {
-		cfg.Policy.MaxGhosts = *maxGhosts
+	if *maxGhosts >= 0 {
+		cfg.Policy = cfg.Policy.SetCap(*maxGhosts)
 	}
-	if *mode != "" || *maxGhosts > 0 {
+	if *mode != "" || *maxGhosts >= 0 {
 		if err := cfg.Save(); err != nil {
 			return err
 		}
 	}
 
+	// The workspace peer counts. It is not one of the ghosts the cap governs, it
+	// is always there on top of them, and a figure that leaves it out understates
+	// what somebody is agreeing to by exactly one process.
+	processes := cfg.Policy.Cap()
+	if cfg.Policy.Mode != daemon.ModeOff {
+		processes++
+	}
 	fmt.Fprintf(env.Stdout, "mode        %s\n", cfg.Policy.Mode)
-	fmt.Fprintf(env.Stdout, "max ghosts  %d, about %d MB of resident memory\n",
-		cfg.Policy.MaxGhosts, cfg.Policy.MaxGhosts*6+20)
+	fmt.Fprintf(env.Stdout, "max ghosts  %d, so %d processes and about %d MB of resident memory\n",
+		cfg.Policy.Cap(), processes, processes*6+20)
 	fmt.Fprintln(env.Stdout,
 		"\nbeyond the cap the least recently used loses its process. Nothing becomes")
-	fmt.Fprintln(env.Stdout,
-		"unreachable, because the workspace peer still carries everybody.")
+	if cfg.Policy.Mode == daemon.ModeOff {
+		fmt.Fprintln(env.Stdout,
+			"\noff means no processes at all, so nothing appears in your agent list and")
+		fmt.Fprintln(env.Stdout,
+			"everything goes through the MCP tools instead.")
+	} else {
+		fmt.Fprintln(env.Stdout,
+			"unreachable, because the workspace peer still carries everybody.")
+	}
 	return nil
+}
+
+// describeTransport says whether the workspace can be reached, in a sentence
+// somebody can act on.
+//
+// It exists because status used to answer the wrong question. With the relay
+// stopped it went on printing the workspace and an empty roster, which looks
+// exactly like a workspace where nobody is around, and only the connector log
+// said otherwise.
+func describeTransport(h daemon.TransportHealth) string {
+	switch {
+	case h.Connected:
+		return "connected"
+	case !h.EverConnected:
+		reason := "it has not been reached yet"
+		if h.Detail != "" {
+			reason = h.Detail
+		}
+		return "never connected, so nothing in this workspace is reachable: " + reason
+	default:
+		since := ""
+		if !h.Since.IsZero() {
+			since = fmt.Sprintf(" since %s", h.Since.Format("15:04:05"))
+		}
+		reason := ""
+		if h.Detail != "" {
+			reason = ": " + h.Detail
+		}
+		return fmt.Sprintf("disconnected%s, retrying%s", since, reason)
+	}
 }
 
 // runSessions lists what this machine can reach.
@@ -570,8 +638,9 @@ func runStatus(_ context.Context, env Env, _ []string) error {
 	if status.Degraded != "" {
 		fmt.Fprintf(env.Stdout, "degraded      %s\n", status.Degraded)
 	}
+	fmt.Fprintf(env.Stdout, "relay         %s\n", describeTransport(status.Transport))
 	fmt.Fprintf(env.Stdout, "mode          %s, up to %d native peers\n",
-		status.Policy.Mode, status.Policy.MaxGhosts)
+		status.Policy.Mode, status.Policy.Cap())
 	fmt.Fprintf(env.Stdout, "session dirs  %s\n", strings.Join(status.SessionDirs, ", "))
 
 	fmt.Fprintln(env.Stdout, "\nlocal Claude Code sessions:")

@@ -255,7 +255,7 @@ func renderStatus(status *daemon.Status) string {
 		fmt.Fprintf(&b, "Degraded: %s\n", status.Degraded)
 	}
 	fmt.Fprintf(&b, "Promotion: %s, up to %d native peers\n",
-		status.Policy.Mode, status.Policy.MaxGhosts)
+		status.Policy.Mode, status.Policy.Cap())
 	fmt.Fprintf(&b, "Local sessions: %d\n", len(status.Local))
 	fmt.Fprintf(&b, "Remote sessions: %d\n", len(status.Remote))
 	fmt.Fprintf(&b, "Native peers running: %d\n", len(status.Peers))

@@ -113,9 +113,6 @@ func (c Config) withDefaults() Config {
 	if c.Policy.Mode == "" {
 		c.Policy.Mode = daemon.ModeAuto
 	}
-	if c.Policy.MaxGhosts <= 0 {
-		c.Policy.MaxGhosts = daemon.DefaultMaxGhosts
-	}
 	return c
 }
 

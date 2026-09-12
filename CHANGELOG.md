@@ -38,6 +38,28 @@ All notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- Status and doctor say whether the relay can be reached, and whether it ever
+  was. With the relay stopped they used to report the workspace as though
+  everything were fine, which looks exactly like a workspace where nobody is
+  around.
+- No native peer is published until the relay has accepted this machine. A
+  connector the relay refuses used to put a peer in every session's agent list,
+  offering a workspace it had no access to.
+- A message to somebody whose connector is away is handed over and queued for
+  them, instead of being refused before it leaves. The relay always had the
+  queue; nothing could reach it.
+- A reply reaches a sender who exposes no session of their own. The framing
+  invites the reader to reply, and the reply used to die in the connector.
+- Trust and promotion settings are reread while the connector runs, so lowering
+  the level for somebody takes effect without a restart.
+- Two concurrent sends to the same destination no longer take the same sequence
+  number.
+- `policy -mode off` runs no processes at all, and a cap of zero means zero
+  rather than silently becoming eight. The memory estimate counts the workspace
+  peer, which is always there on top of the cap.
+- `expose` and `unexpose` parse their flags, so `expose --help` no longer shares
+  a session named `--help`.
+
 - Creating an invitation while the relay is running works, and no longer destroys
   it. The two processes share one file, the relay never reread it, and the next
   time it persisted anything it overwrote whatever the command line had written.

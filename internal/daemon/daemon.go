@@ -49,8 +49,12 @@ const DefaultPollInterval = 2 * time.Second
 // Policy is the part of the configuration that belongs to this machine and is
 // never synchronised with the workspace.
 type Policy struct {
-	Mode      string `json:"mode"`
-	MaxGhosts int    `json:"maxGhosts"`
+	Mode string `json:"mode"`
+	// MaxGhosts is a pointer so that asking for none can be told apart from not
+	// asking. With a plain integer, a configuration that never mentioned the cap
+	// and one that set it to zero looked identical, and both quietly became
+	// eight, so there was no way to say "run no extra processes".
+	MaxGhosts *int `json:"maxGhosts,omitempty"`
 	// Subscribed lists remote session identifiers to promote in manual mode.
 	Subscribed []string `json:"subscribed,omitempty"`
 	// IncludeWorkspaceInNames prefixes peer names with the workspace, which is
@@ -62,9 +66,27 @@ func (p Policy) withDefaults() Policy {
 	if p.Mode == "" {
 		p.Mode = ModeAuto
 	}
-	if p.MaxGhosts <= 0 {
-		p.MaxGhosts = DefaultMaxGhosts
+	return p
+}
+
+// Cap is how many remote sessions get a native peer, with the default applied.
+//
+// Zero is a real answer and means none. A negative value is a typo rather than
+// an intention, so it is treated as none too, because failing towards fewer
+// processes is the safe direction on somebody else's machine.
+func (p Policy) Cap() int {
+	if p.MaxGhosts == nil {
+		return DefaultMaxGhosts
 	}
+	if *p.MaxGhosts < 0 {
+		return 0
+	}
+	return *p.MaxGhosts
+}
+
+// SetCap returns a copy with the cap set explicitly.
+func (p Policy) SetCap(n int) Policy {
+	p.MaxGhosts = &n
 	return p
 }
 
@@ -123,6 +145,15 @@ type Options struct {
 	// ControlAddressPath is where the connector publishes the path of its
 	// control endpoint, so the MCP server and the command line can find it.
 	ControlAddressPath string
+
+	// Reload rereads the settings that belong to this machine, if the caller
+	// provides it.
+	//
+	// It exists because trust used to be read once, at startup. Somebody who
+	// lowered the level for a person saw no change and no explanation, and had to
+	// know to restart the connector. Being told to restart a background process
+	// before a security setting applies is the kind of thing that gets skipped.
+	Reload func() (TrustSettings, Policy, error)
 }
 
 // Daemon is the connector that runs once per machine.
@@ -140,6 +171,11 @@ type Daemon struct {
 	exposedTo map[string]string    // exposed session id to local session name
 	lastUsed  map[string]time.Time // remote session id to last traffic
 	degraded  string
+
+	// replyTo maps every way somebody might name a recent sender to an address
+	// the transport accepts. It is what makes a conversation go both ways when
+	// the person who started it exposes no session of their own.
+	replyTo map[string]string
 }
 
 // New builds a daemon. It does not start anything.
@@ -199,6 +235,7 @@ func New(opts Options) (*Daemon, error) {
 		peers:     map[string]string{},
 		exposedTo: map[string]string{},
 		lastUsed:  map[string]time.Time{},
+		replyTo:   map[string]string{},
 	}
 
 	if !opts.Platform.Verified() {
@@ -254,7 +291,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"platform", d.platform.GOOS(),
 		"sessions", d.registry.Dirs(),
 		"mode", d.opts.Policy.Mode,
-		"maxGhosts", d.opts.Policy.MaxGhosts)
+		"maxGhosts", d.opts.Policy.Cap())
 
 	d.poll(ctx, sup)
 
@@ -290,12 +327,46 @@ func (d *Daemon) poll(ctx context.Context, sup *supervisor) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			d.reloadSettings()
 			d.refreshLocal()
 			d.publishExposed()
 			d.reconcile(sup)
 			d.writeStatus(sup)
 			t.Reset(d.opts.PollInterval)
 		}
+	}
+}
+
+// reloadSettings picks up changes a person made while this was running.
+//
+// Only the settings that belong to this machine are reread. The workspace, the
+// relay and the identity are what the connector connected with, and changing
+// those means starting again.
+func (d *Daemon) reloadSettings() {
+	if d.opts.Reload == nil {
+		return
+	}
+
+	trustSettings, policy, err := d.opts.Reload()
+	if err != nil {
+		d.log.Warn("could not reread the configuration", "error", err)
+		return
+	}
+	if trustSettings.Workspace == "" {
+		// Same reasoning as in New: without an opinion of its own, a machine
+		// would let whatever the workspace proposes stand.
+		trustSettings.Workspace = trust.Collaborator
+	}
+
+	d.mu.Lock()
+	changed := d.opts.Policy.Mode != policy.Mode || d.opts.Policy.Cap() != policy.Cap()
+	d.opts.Trust = trustSettings
+	d.opts.Policy = policy.withDefaults()
+	d.mu.Unlock()
+
+	if changed {
+		d.log.Info("the promotion policy changed",
+			"mode", policy.Mode, "maxGhosts", policy.Cap())
 	}
 }
 
@@ -416,11 +487,26 @@ func (d *Daemon) reconcile(sup *supervisor) {
 // remote session each one stands for. The workspace peer maps to the empty
 // string, because it stands for all of them.
 func (d *Daemon) wanted() map[string]string {
+	// Nothing is published until the transport has been accepted at least once.
+	//
+	// A peer in somebody's agent list is a promise that messages sent to it go
+	// somewhere. A connector whose identity the relay refuses publishes one
+	// anyway otherwise, and every session on the machine is offered a workspace
+	// it cannot reach. Once a connection has succeeded the peers stay through a
+	// disconnection, because a relay that is briefly away is a different thing
+	// from a workspace this machine was never part of, and status says which.
+	if !d.opts.Transport.Health().EverConnected {
+		return map[string]string{}
+	}
+
+	// Off means no processes. The workspace peer used to be added before the mode
+	// was looked at, so somebody who asked for none got one.
+	if d.opts.Policy.Mode == ModeOff {
+		return map[string]string{}
+	}
+
 	want := map[string]string{
 		WorkspacePeerName(d.opts.Workspace): "",
-	}
-	if d.opts.Policy.Mode == ModeOff {
-		return want
 	}
 
 	roster := d.opts.Transport.Roster()
@@ -443,7 +529,7 @@ func (d *Daemon) wanted() map[string]string {
 
 	// Beyond the cap, the least recently used loses its process. Nothing becomes
 	// unreachable, because the workspace peer still carries it.
-	if len(candidates) > d.opts.Policy.MaxGhosts {
+	if len(candidates) > d.opts.Policy.Cap() {
 		d.mu.Lock()
 		used := make(map[string]time.Time, len(d.lastUsed))
 		for k, v := range d.lastUsed {
@@ -454,7 +540,7 @@ func (d *Daemon) wanted() map[string]string {
 		sort.SliceStable(candidates, func(i, j int) bool {
 			return used[candidates[i].ID].After(used[candidates[j].ID])
 		})
-		candidates = candidates[:d.opts.Policy.MaxGhosts]
+		candidates = candidates[:d.opts.Policy.Cap()]
 	}
 
 	for _, s := range candidates {
@@ -524,7 +610,43 @@ func (d *Daemon) resolveTarget(peer, text string) (target, body string) {
 			return s.ID, rest
 		}
 	}
+
+	// Nobody in the roster answers to that name. Somebody who wrote recently
+	// might, and they are reachable precisely because they wrote.
+	d.mu.Lock()
+	addr, known := d.replyTo[strings.ToLower(mention)]
+	d.mu.Unlock()
+	if known {
+		return addr, rest
+	}
 	return "", text
+}
+
+// rememberSender records how to answer somebody who just wrote.
+//
+// Every name the message could be answered by is recorded, because the person
+// replying writes a name rather than an identifier: the session, the person, and
+// both of the ways a peer is named. The map only grows with the number of people
+// who have actually written, which is the size of the workspace at worst.
+func (d *Daemon) rememberSender(msg Delivery) {
+	if msg.ReplyTo == "" {
+		return
+	}
+
+	names := []string{
+		msg.From.Session,
+		msg.From.Person,
+		msg.From.Person + "/" + msg.From.Session,
+		msg.From.Person + "-" + msg.From.Session,
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, n := range names {
+		if n != "" && n != "/" && n != "-" {
+			d.replyTo[strings.ToLower(n)] = msg.ReplyTo
+		}
+	}
 }
 
 // splitMention pulls a leading destination out of a message written to the
@@ -608,6 +730,8 @@ func (d *Daemon) deliver(ctx context.Context, sup *supervisor, msg Delivery) err
 	// that applies. What it changes is the framing the text arrives in, which is
 	// the only thing that actually governs how the receiving model treats it.
 	// Permissions are untouched at every level.
+	d.rememberSender(msg)
+
 	level := d.opts.Trust.For(msg.ProposedTrust, msg.From.Person, target.Name)
 	framed, err := trust.Frame(level, trust.Sender{
 		Person:    msg.From.Person,
@@ -709,6 +833,7 @@ type Status struct {
 	Platform    string            `json:"platform"`
 	Verified    bool              `json:"verified"`
 	Degraded    string            `json:"degraded,omitempty"`
+	Transport   TransportHealth   `json:"transport"`
 	SessionDirs []string          `json:"sessionDirs"`
 	Policy      Policy            `json:"policy"`
 	Local       []LocalSession    `json:"localSessions"`
@@ -739,6 +864,7 @@ func (d *Daemon) Snapshot() Status {
 
 	return Status{
 		Workspace:   d.opts.Workspace,
+		Transport:   d.opts.Transport.Health(),
 		Platform:    d.platform.GOOS(),
 		Verified:    d.platform.Verified(),
 		Degraded:    degraded,
